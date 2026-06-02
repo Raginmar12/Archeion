@@ -1,4 +1,10 @@
+from decimal import Decimal, ROUND_HALF_UP
+
 from django.db import models
+
+
+PESOS_DECIMALES = Decimal("0.01")
+PORCENTAJE_DECIMALES = Decimal("0.0000")
 
 
 class ConceptoIngreso(models.Model):
@@ -28,6 +34,63 @@ class MetodoPago(models.Model):
         return self.nombre
 
 
+class CanalCobro(models.Model):
+    nombre = models.CharField(max_length=100, unique=True)
+    metodo_pago = models.ForeignKey(
+        MetodoPago,
+        on_delete=models.PROTECT,
+        related_name="canales_cobro",
+    )
+    activo = models.BooleanField(default=True)
+    creado_en = models.DateTimeField(auto_now_add=True)
+    actualizado_en = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["nombre"]
+        verbose_name = "canal de cobro"
+        verbose_name_plural = "canales de cobro"
+
+    def __str__(self):
+        return self.nombre
+
+
+class EsquemaComision(models.Model):
+    canal_cobro = models.ForeignKey(
+        CanalCobro,
+        on_delete=models.PROTECT,
+        related_name="esquemas_comision",
+    )
+    nombre = models.CharField(max_length=100)
+    porcentaje_base = models.DecimalField(max_digits=7, decimal_places=4)
+    cobra_iva = models.BooleanField(default=False)
+    porcentaje_iva = models.DecimalField(
+        max_digits=5,
+        decimal_places=2,
+        default=Decimal("16.00"),
+    )
+    fecha_referencia = models.DateField(null=True, blank=True)
+    activo = models.BooleanField(default=True)
+    notas = models.TextField(blank=True)
+    creado_en = models.DateTimeField(auto_now_add=True)
+    actualizado_en = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["canal_cobro__nombre", "nombre"]
+        verbose_name = "esquema de comisión"
+        verbose_name_plural = "esquemas de comisión"
+
+    def __str__(self):
+        return f"{self.canal_cobro} - {self.nombre}"
+
+    @property
+    def porcentaje_total(self):
+        if not self.cobra_iva:
+            return self.porcentaje_base
+
+        multiplicador_iva = Decimal("1") + (self.porcentaje_iva / Decimal("100"))
+        return (self.porcentaje_base * multiplicador_iva).quantize(PORCENTAJE_DECIMALES)
+
+
 class OrigenIngreso(models.Model):
     nombre = models.CharField(max_length=100, unique=True)
     descripcion = models.TextField(blank=True)
@@ -44,7 +107,7 @@ class OrigenIngreso(models.Model):
 
 class Ingreso(models.Model):
     fecha = models.DateTimeField()
-    monto = models.DecimalField(max_digits=10, decimal_places=2)
+    monto_bruto = models.DecimalField(max_digits=10, decimal_places=2)
 
     concepto = models.ForeignKey(
         ConceptoIngreso,
@@ -58,12 +121,44 @@ class Ingreso(models.Model):
         related_name="ingresos",
     )
 
+    canal_cobro = models.ForeignKey(
+        CanalCobro,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="ingresos",
+    )
+
+    esquema_comision = models.ForeignKey(
+        EsquemaComision,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="ingresos",
+    )
+
     origen = models.ForeignKey(
         OrigenIngreso,
         on_delete=models.PROTECT,
         related_name="ingresos",
     )
 
+    porcentaje_comision_aplicado = models.DecimalField(
+        max_digits=7,
+        decimal_places=4,
+        default=Decimal("0.0000"),
+    )
+    comision = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        default=Decimal("0.00"),
+    )
+    monto_neto = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        default=Decimal("0.00"),
+    )
+    comision_manual = models.BooleanField(default=False)
     notas = models.TextField(blank=True)
 
     creado_en = models.DateTimeField(auto_now_add=True)
@@ -75,4 +170,39 @@ class Ingreso(models.Model):
         verbose_name_plural = "ingresos"
 
     def __str__(self):
-        return f"{self.fecha.date()} - {self.concepto} - ${self.monto}"
+        return f"{self.fecha.date()} - {self.concepto} - ${self.monto_bruto}"
+
+    def calcular_comision(self):
+        monto_bruto = (self.monto_bruto or Decimal("0.00")).quantize(PESOS_DECIMALES)
+
+        if self.comision_manual:
+            self.comision = (self.comision or Decimal("0.00")).quantize(
+                PESOS_DECIMALES,
+                rounding=ROUND_HALF_UP,
+            )
+            self.monto_neto = (monto_bruto - self.comision).quantize(PESOS_DECIMALES)
+
+            if monto_bruto:
+                self.porcentaje_comision_aplicado = (
+                    (self.comision / monto_bruto) * Decimal("100")
+                ).quantize(PORCENTAJE_DECIMALES, rounding=ROUND_HALF_UP)
+            return
+
+        if not self.esquema_comision:
+            porcentaje = Decimal("0.0000")
+        else:
+            porcentaje = self.esquema_comision.porcentaje_total
+
+        self.porcentaje_comision_aplicado = porcentaje.quantize(
+            PORCENTAJE_DECIMALES,
+            rounding=ROUND_HALF_UP,
+        )
+        self.comision = ((monto_bruto * porcentaje) / Decimal("100")).quantize(
+            PESOS_DECIMALES,
+            rounding=ROUND_HALF_UP,
+        )
+        self.monto_neto = (monto_bruto - self.comision).quantize(PESOS_DECIMALES)
+
+    def save(self, *args, **kwargs):
+        self.calcular_comision()
+        super().save(*args, **kwargs)
