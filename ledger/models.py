@@ -5,6 +5,17 @@ from django.db import models
 
 PESOS_DECIMALES = Decimal("0.01")
 PORCENTAJE_DECIMALES = Decimal("0.0000")
+CAMPOS_RECALCULO_COMISION = {
+    "monto_bruto",
+    "esquema_comision_id",
+    "comision_manual",
+    "comision",
+}
+CAMPOS_CALCULADOS_COMISION = {
+    "porcentaje_comision_aplicado",
+    "comision",
+    "monto_neto",
+}
 
 
 class ConceptoIngreso(models.Model):
@@ -203,6 +214,34 @@ class Ingreso(models.Model):
         )
         self.monto_neto = (monto_bruto - self.comision).quantize(PESOS_DECIMALES)
 
+    def _debe_recalcular_comision(self, update_fields=None):
+        if self._state.adding or not self.pk:
+            return True
+
+        if update_fields is not None:
+            update_fields = set(update_fields)
+            if not update_fields & CAMPOS_RECALCULO_COMISION:
+                return False
+
+        try:
+            ingreso_previo = Ingreso.objects.filter(pk=self.pk).values(
+                *CAMPOS_RECALCULO_COMISION,
+            ).get()
+        except Ingreso.DoesNotExist:
+            return True
+
+        return any(
+            ingreso_previo[campo] != getattr(self, campo)
+            for campo in CAMPOS_RECALCULO_COMISION
+        )
+
     def save(self, *args, **kwargs):
-        self.calcular_comision()
+        update_fields = kwargs.get("update_fields")
+
+        if self._debe_recalcular_comision(update_fields=update_fields):
+            self.calcular_comision()
+
+            if update_fields is not None:
+                kwargs["update_fields"] = set(update_fields) | CAMPOS_CALCULADOS_COMISION
+
         super().save(*args, **kwargs)
