@@ -8,9 +8,14 @@ PESOS_DECIMALES = Decimal("0.01")
 PORCENTAJE_DECIMALES = Decimal("0.0000")
 CAMPOS_RECALCULO_COMISION = {
     "monto_bruto",
+    "canal_cobro_id",
     "esquema_comision_id",
     "comision_manual",
     "comision",
+}
+CAMPOS_RECALCULO_COMISION_UPDATE_FIELDS = CAMPOS_RECALCULO_COMISION | {
+    "canal_cobro",
+    "esquema_comision",
 }
 CAMPOS_CALCULADOS_COMISION = {
     "porcentaje_comision_aplicado",
@@ -53,6 +58,13 @@ class CanalCobro(models.Model):
         on_delete=models.PROTECT,
         related_name="canales_cobro",
     )
+    esquema_comision_predeterminado = models.ForeignKey(
+        "EsquemaComision",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="canales_predeterminados",
+    )
     activo = models.BooleanField(default=True)
     creado_en = models.DateTimeField(auto_now_add=True)
     actualizado_en = models.DateTimeField(auto_now=True)
@@ -64,6 +76,27 @@ class CanalCobro(models.Model):
 
     def __str__(self):
         return self.nombre
+
+    def clean(self):
+        super().clean()
+
+        if not self.pk or not self.esquema_comision_predeterminado_id:
+            return
+
+        esquema_asociado = (
+            self.esquema_comision_predeterminado.canales_cobro.filter(
+                pk=self.pk,
+            ).exists()
+        )
+        if not esquema_asociado:
+            raise ValidationError(
+                {
+                    "esquema_comision_predeterminado": (
+                        "El esquema de comisión predeterminado debe estar "
+                        "asociado a este canal de cobro."
+                    ),
+                },
+            )
 
 
 class EsquemaComision(models.Model):
@@ -127,17 +160,9 @@ class Ingreso(models.Model):
         related_name="ingresos",
     )
 
-    metodo_pago = models.ForeignKey(
-        MetodoPago,
-        on_delete=models.PROTECT,
-        related_name="ingresos",
-    )
-
     canal_cobro = models.ForeignKey(
         CanalCobro,
         on_delete=models.PROTECT,
-        null=True,
-        blank=True,
         related_name="ingresos",
     )
 
@@ -184,24 +209,54 @@ class Ingreso(models.Model):
     def __str__(self):
         return f"{self.fecha.date()} - {self.concepto} - ${self.monto_bruto}"
 
+    @property
+    def metodo_pago(self):
+        if self.canal_cobro_id:
+            return self.canal_cobro.metodo_pago
+        return None
+
+    def asignar_esquema_predeterminado(self):
+        if self.esquema_comision_id or not self.canal_cobro_id:
+            return False
+
+        esquema_predeterminado = self.canal_cobro.esquema_comision_predeterminado
+        if not esquema_predeterminado:
+            return False
+
+        self.esquema_comision = esquema_predeterminado
+        return True
+
+    def validar_canal_y_esquema_comision(self):
+        errores = {}
+
+        if not self.canal_cobro_id:
+            errores["canal_cobro"] = "Todo ingreso debe tener un canal de cobro."
+
+        if self.canal_cobro_id:
+            self.asignar_esquema_predeterminado()
+
+        if not self.esquema_comision_id:
+            errores["esquema_comision"] = (
+                "Todo ingreso debe tener un esquema de comisión. "
+                "Selecciona uno o configura un esquema predeterminado para el canal."
+            )
+
+        if self.canal_cobro_id and self.esquema_comision_id:
+            esquema_asociado = self.esquema_comision.canales_cobro.filter(
+                pk=self.canal_cobro_id,
+            ).exists()
+            if not esquema_asociado:
+                errores["esquema_comision"] = (
+                    "El esquema de comisión seleccionado no está asociado "
+                    "al canal de cobro del ingreso."
+                )
+
+        if errores:
+            raise ValidationError(errores)
+
     def clean(self):
         super().clean()
-
-        if not self.canal_cobro_id or not self.esquema_comision_id:
-            return
-
-        esquema_asociado = self.esquema_comision.canales_cobro.filter(
-            pk=self.canal_cobro_id,
-        ).exists()
-        if not esquema_asociado:
-            raise ValidationError(
-                {
-                    "esquema_comision": (
-                        "El esquema de comisión seleccionado no está asociado "
-                        "al canal de cobro del ingreso."
-                    ),
-                },
-            )
+        self.validar_canal_y_esquema_comision()
 
     def calcular_comision(self):
         monto_bruto = (self.monto_bruto or Decimal("0.00")).quantize(PESOS_DECIMALES)
@@ -219,10 +274,7 @@ class Ingreso(models.Model):
                 ).quantize(PORCENTAJE_DECIMALES, rounding=ROUND_HALF_UP)
             return
 
-        if not self.esquema_comision:
-            porcentaje = Decimal("0.0000")
-        else:
-            porcentaje = self.esquema_comision.porcentaje_total
+        porcentaje = self.esquema_comision.porcentaje_total
 
         self.porcentaje_comision_aplicado = porcentaje.quantize(
             PORCENTAJE_DECIMALES,
@@ -240,7 +292,7 @@ class Ingreso(models.Model):
 
         if update_fields is not None:
             update_fields = set(update_fields)
-            if not update_fields & CAMPOS_RECALCULO_COMISION:
+            if not update_fields & CAMPOS_RECALCULO_COMISION_UPDATE_FIELDS:
                 return False
 
         try:
@@ -257,11 +309,19 @@ class Ingreso(models.Model):
 
     def save(self, *args, **kwargs):
         update_fields = kwargs.get("update_fields")
+        esquema_asignado = self.asignar_esquema_predeterminado()
 
-        if self._debe_recalcular_comision(update_fields=update_fields):
+        self.validar_canal_y_esquema_comision()
+
+        debe_recalcular = self._debe_recalcular_comision(update_fields=update_fields)
+        if debe_recalcular or esquema_asignado:
             self.calcular_comision()
 
             if update_fields is not None:
-                kwargs["update_fields"] = set(update_fields) | CAMPOS_CALCULADOS_COMISION
+                kwargs["update_fields"] = (
+                    set(update_fields)
+                    | CAMPOS_CALCULADOS_COMISION
+                    | {"esquema_comision"}
+                )
 
         super().save(*args, **kwargs)

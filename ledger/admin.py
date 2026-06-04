@@ -26,9 +26,18 @@ class MetodoPagoAdmin(admin.ModelAdmin):
 
 @admin.register(CanalCobro)
 class CanalCobroAdmin(admin.ModelAdmin):
-    list_display = ("nombre", "metodo_pago", "activo")
-    search_fields = ("nombre", "metodo_pago__nombre")
-    list_filter = ("metodo_pago", "activo")
+    list_display = (
+        "nombre",
+        "metodo_pago",
+        "esquema_comision_predeterminado",
+        "activo",
+    )
+    search_fields = (
+        "nombre",
+        "metodo_pago__nombre",
+        "esquema_comision_predeterminado__nombre",
+    )
+    list_filter = ("metodo_pago", "esquema_comision_predeterminado", "activo")
 
 
 @admin.register(EsquemaComision)
@@ -61,7 +70,7 @@ class IngresoAdmin(admin.ModelAdmin):
         "comision",
         "monto_neto",
         "concepto",
-        "metodo_pago",
+        "metodo_pago_derivado",
         "canal_cobro",
         "esquema_comision",
         "origen",
@@ -71,14 +80,20 @@ class IngresoAdmin(admin.ModelAdmin):
         "concepto__nombre",
         "origen__nombre",
         "canal_cobro__nombre",
+        "canal_cobro__metodo_pago__nombre",
+        "esquema_comision__nombre",
     )
     list_filter = (
         "concepto",
-        "metodo_pago",
         "canal_cobro",
+        "canal_cobro__metodo_pago",
         "esquema_comision",
         "origen",
         "fecha",
         "comision_manual",
     )
     date_hierarchy = "fecha"
+
+    @admin.display(description="método de pago", ordering="canal_cobro__metodo_pago")
+    def metodo_pago_derivado(self, obj):
+        return obj.metodo_pago
