@@ -4,6 +4,7 @@ from .models import (
     CanalCobro,
     ConceptoIngreso,
     EsquemaComision,
+    GastoMaterial,
     Ingreso,
     MetodoPago,
     OrigenIngreso,
@@ -12,9 +13,14 @@ from .models import (
 
 @admin.register(ConceptoIngreso)
 class ConceptoIngresoAdmin(admin.ModelAdmin):
-    list_display = ("nombre", "activo")
+    list_display = (
+        "nombre",
+        "incluye_material",
+        "monto_material_sugerido",
+        "activo",
+    )
     search_fields = ("nombre", "descripcion")
-    list_filter = ("activo",)
+    list_filter = ("incluye_material", "activo")
 
 
 @admin.register(MetodoPago)
@@ -62,6 +68,14 @@ class OrigenIngresoAdmin(admin.ModelAdmin):
     list_filter = ("activo",)
 
 
+@admin.register(GastoMaterial)
+class GastoMaterialAdmin(admin.ModelAdmin):
+    list_display = ("fecha", "monto", "descripcion")
+    search_fields = ("descripcion", "notas")
+    list_filter = ("fecha",)
+    date_hierarchy = "fecha"
+
+
 @admin.register(Ingreso)
 class IngresoAdmin(admin.ModelAdmin):
     list_display = (
@@ -69,6 +83,11 @@ class IngresoAdmin(admin.ModelAdmin):
         "monto_bruto",
         "comision",
         "monto_neto",
+        "monto_material_cobrado",
+        "material_recuperado",
+        "material_excedente",
+        "pool_material_antes",
+        "pool_material_despues",
         "concepto",
         "metodo_pago_derivado",
         "canal_cobro",
@@ -85,6 +104,7 @@ class IngresoAdmin(admin.ModelAdmin):
     )
     list_filter = (
         "concepto",
+        "concepto__incluye_material",
         "canal_cobro",
         "canal_cobro__metodo_pago",
         "esquema_comision",

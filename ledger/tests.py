@@ -8,6 +8,7 @@ from .models import (
     CanalCobro,
     ConceptoIngreso,
     EsquemaComision,
+    GastoMaterial,
     Ingreso,
     MetodoPago,
     OrigenIngreso,
@@ -64,6 +65,11 @@ class LedgerComisionesTests(TestCase):
         self.canal_point_air.save()
 
         self.concepto = ConceptoIngreso.objects.create(nombre="Consulta")
+        self.concepto_material = ConceptoIngreso.objects.create(
+            nombre="Consulta con material",
+            incluye_material=True,
+            monto_material_sugerido=Decimal("50.00"),
+        )
         self.origen = OrigenIngreso.objects.create(nombre="Consultorio")
 
     def crear_ingreso(self, **kwargs):
@@ -224,3 +230,122 @@ class LedgerComisionesTests(TestCase):
         self.assertEqual(ingreso.comision, Decimal("15.00"))
         self.assertEqual(ingreso.monto_neto, Decimal("285.00"))
         self.assertEqual(ingreso.porcentaje_comision_aplicado, Decimal("5.0000"))
+
+
+    def test_gasto_material_aumenta_pool(self):
+        GastoMaterial.objects.create(
+            fecha=timezone.now(),
+            monto=Decimal("500.00"),
+            descripcion="Material de curación",
+        )
+
+        self.assertEqual(Ingreso.calcular_pool_material_actual(), Decimal("500.00"))
+
+    def test_ingreso_material_menor_que_pool_recupera_y_reduce_pool(self):
+        GastoMaterial.objects.create(
+            fecha=timezone.now(),
+            monto=Decimal("500.00"),
+            descripcion="Material de curación",
+        )
+
+        ingreso = self.crear_ingreso(
+            concepto=self.concepto_material,
+            monto_material_cobrado=Decimal("50.00"),
+        )
+
+        self.assertEqual(ingreso.pool_material_antes, Decimal("500.00"))
+        self.assertEqual(ingreso.material_recuperado, Decimal("50.00"))
+        self.assertEqual(ingreso.material_excedente, Decimal("0.00"))
+        self.assertEqual(ingreso.pool_material_despues, Decimal("450.00"))
+        self.assertEqual(Ingreso.calcular_pool_material_actual(), Decimal("450.00"))
+
+    def test_ingreso_material_mayor_que_pool_genera_excedente(self):
+        GastoMaterial.objects.create(
+            fecha=timezone.now(),
+            monto=Decimal("20.00"),
+            descripcion="Material de curación",
+        )
+
+        ingreso = self.crear_ingreso(
+            concepto=self.concepto_material,
+            monto_material_cobrado=Decimal("50.00"),
+        )
+
+        self.assertEqual(ingreso.pool_material_antes, Decimal("20.00"))
+        self.assertEqual(ingreso.material_recuperado, Decimal("20.00"))
+        self.assertEqual(ingreso.material_excedente, Decimal("30.00"))
+        self.assertEqual(ingreso.pool_material_despues, Decimal("0.00"))
+        self.assertEqual(Ingreso.calcular_pool_material_actual(), Decimal("0.00"))
+
+    def test_ingreso_material_con_pool_cero_genera_todo_excedente(self):
+        ingreso = self.crear_ingreso(
+            concepto=self.concepto_material,
+            monto_material_cobrado=Decimal("50.00"),
+        )
+
+        self.assertEqual(ingreso.pool_material_antes, Decimal("0.00"))
+        self.assertEqual(ingreso.material_recuperado, Decimal("0.00"))
+        self.assertEqual(ingreso.material_excedente, Decimal("50.00"))
+        self.assertEqual(ingreso.pool_material_despues, Decimal("0.00"))
+
+    def test_editar_solo_notas_no_recalcula_material_historico(self):
+        GastoMaterial.objects.create(
+            fecha=timezone.now(),
+            monto=Decimal("500.00"),
+            descripcion="Material de curación",
+        )
+        ingreso = self.crear_ingreso(
+            concepto=self.concepto_material,
+            monto_material_cobrado=Decimal("50.00"),
+        )
+
+        GastoMaterial.objects.create(
+            fecha=timezone.now(),
+            monto=Decimal("100.00"),
+            descripcion="Material posterior",
+        )
+        ingreso.notas = "Editar notas no debe recalcular material"
+        ingreso.save()
+        ingreso.refresh_from_db()
+
+        self.assertEqual(ingreso.pool_material_antes, Decimal("500.00"))
+        self.assertEqual(ingreso.material_recuperado, Decimal("50.00"))
+        self.assertEqual(ingreso.material_excedente, Decimal("0.00"))
+        self.assertEqual(ingreso.pool_material_despues, Decimal("450.00"))
+
+    def test_cambiar_monto_material_cobrado_recalcula_material(self):
+        GastoMaterial.objects.create(
+            fecha=timezone.now(),
+            monto=Decimal("500.00"),
+            descripcion="Material de curación",
+        )
+        ingreso = self.crear_ingreso(
+            concepto=self.concepto_material,
+            monto_material_cobrado=Decimal("50.00"),
+        )
+
+        ingreso.monto_material_cobrado = Decimal("120.00")
+        ingreso.save()
+        ingreso.refresh_from_db()
+
+        self.assertEqual(ingreso.pool_material_antes, Decimal("500.00"))
+        self.assertEqual(ingreso.material_recuperado, Decimal("120.00"))
+        self.assertEqual(ingreso.material_excedente, Decimal("0.00"))
+        self.assertEqual(ingreso.pool_material_despues, Decimal("380.00"))
+
+    def test_no_permite_material_cobrado_si_concepto_no_incluye_material(self):
+        with self.assertRaises(ValidationError):
+            self.crear_ingreso(
+                concepto=self.concepto,
+                monto_material_cobrado=Decimal("50.00"),
+            )
+
+    def test_permite_concepto_con_material_sin_material_cobrado(self):
+        ingreso = self.crear_ingreso(
+            concepto=self.concepto_material,
+            monto_material_cobrado=Decimal("0.00"),
+        )
+
+        self.assertEqual(ingreso.monto_material_cobrado, Decimal("0.00"))
+        self.assertEqual(ingreso.material_recuperado, Decimal("0.00"))
+        self.assertEqual(ingreso.material_excedente, Decimal("0.00"))

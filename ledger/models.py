@@ -2,6 +2,7 @@ from decimal import Decimal, ROUND_HALF_UP
 
 from django.core.exceptions import ValidationError
 from django.db import models
+from django.db.models import Sum
 
 
 PESOS_DECIMALES = Decimal("0.01")
@@ -22,11 +23,24 @@ CAMPOS_CALCULADOS_COMISION = {
     "comision",
     "monto_neto",
 }
+CAMPOS_RECALCULO_MATERIAL = {"monto_material_cobrado"}
+CAMPOS_CALCULADOS_MATERIAL = {
+    "material_recuperado",
+    "material_excedente",
+    "pool_material_antes",
+    "pool_material_despues",
+}
 
 
 class ConceptoIngreso(models.Model):
     nombre = models.CharField(max_length=100, unique=True)
     descripcion = models.TextField(blank=True)
+    incluye_material = models.BooleanField(default=False)
+    monto_material_sugerido = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        default=Decimal("0.00"),
+    )
     activo = models.BooleanField(default=True)
 
     class Meta:
@@ -150,6 +164,23 @@ class OrigenIngreso(models.Model):
         return self.nombre
 
 
+class GastoMaterial(models.Model):
+    fecha = models.DateTimeField()
+    monto = models.DecimalField(max_digits=10, decimal_places=2)
+    descripcion = models.CharField(max_length=200, blank=True)
+    notas = models.TextField(blank=True)
+    creado_en = models.DateTimeField(auto_now_add=True)
+    actualizado_en = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-fecha"]
+        verbose_name = "gasto de material"
+        verbose_name_plural = "gastos de material"
+
+    def __str__(self):
+        return f"{self.fecha.date()} - ${self.monto}"
+
+
 class Ingreso(models.Model):
     fecha = models.DateTimeField()
     monto_bruto = models.DecimalField(max_digits=10, decimal_places=2)
@@ -196,6 +227,31 @@ class Ingreso(models.Model):
         default=Decimal("0.00"),
     )
     comision_manual = models.BooleanField(default=False)
+    monto_material_cobrado = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        default=Decimal("0.00"),
+    )
+    material_recuperado = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        default=Decimal("0.00"),
+    )
+    material_excedente = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        default=Decimal("0.00"),
+    )
+    pool_material_antes = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        default=Decimal("0.00"),
+    )
+    pool_material_despues = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        default=Decimal("0.00"),
+    )
     notas = models.TextField(blank=True)
 
     creado_en = models.DateTimeField(auto_now_add=True)
@@ -225,6 +281,69 @@ class Ingreso(models.Model):
 
         self.esquema_comision = esquema_predeterminado
         return True
+
+    @classmethod
+    def calcular_pool_material_actual(cls, excluir_ingreso_id=None):
+        total_gastos = GastoMaterial.objects.aggregate(
+            total=Sum("monto"),
+        )["total"] or Decimal("0.00")
+
+        ingresos = cls.objects.all()
+        if excluir_ingreso_id:
+            ingresos = ingresos.exclude(pk=excluir_ingreso_id)
+
+        total_recuperado = ingresos.aggregate(
+            total=Sum("material_recuperado"),
+        )["total"] or Decimal("0.00")
+
+        pool = total_gastos - total_recuperado
+        if pool < Decimal("0.00"):
+            return Decimal("0.00")
+        return pool.quantize(PESOS_DECIMALES)
+
+    def validar_material(self):
+        monto_material_cobrado = (
+            self.monto_material_cobrado or Decimal("0.00")
+        ).quantize(PESOS_DECIMALES)
+
+        if (
+            monto_material_cobrado > Decimal("0.00")
+            and not self.concepto.incluye_material
+        ):
+            raise ValidationError(
+                {
+                    "monto_material_cobrado": (
+                        "No se puede cobrar material en un concepto que no "
+                        "incluye material."
+                    ),
+                },
+            )
+
+    def calcular_material(self):
+        monto_material_cobrado = (
+            self.monto_material_cobrado or Decimal("0.00")
+        ).quantize(PESOS_DECIMALES, rounding=ROUND_HALF_UP)
+        self.monto_material_cobrado = monto_material_cobrado
+
+        if monto_material_cobrado <= Decimal("0.00"):
+            self.material_recuperado = Decimal("0.00")
+            self.material_excedente = Decimal("0.00")
+            self.pool_material_antes = Decimal("0.00")
+            self.pool_material_despues = Decimal("0.00")
+            return
+
+        pool_material_antes = self.calcular_pool_material_actual(
+            excluir_ingreso_id=self.pk,
+        )
+        material_recuperado = min(monto_material_cobrado, pool_material_antes)
+        material_excedente = monto_material_cobrado - material_recuperado
+
+        self.pool_material_antes = pool_material_antes.quantize(PESOS_DECIMALES)
+        self.material_recuperado = material_recuperado.quantize(PESOS_DECIMALES)
+        self.material_excedente = material_excedente.quantize(PESOS_DECIMALES)
+        self.pool_material_despues = (
+            pool_material_antes - material_recuperado
+        ).quantize(PESOS_DECIMALES)
 
     def validar_canal_y_esquema_comision(self):
         errores = {}
@@ -257,6 +376,7 @@ class Ingreso(models.Model):
     def clean(self):
         super().clean()
         self.validar_canal_y_esquema_comision()
+        self.validar_material()
 
     def calcular_comision(self):
         monto_bruto = (self.monto_bruto or Decimal("0.00")).quantize(PESOS_DECIMALES)
@@ -307,21 +427,51 @@ class Ingreso(models.Model):
             for campo in CAMPOS_RECALCULO_COMISION
         )
 
+    def _debe_recalcular_material(self, update_fields=None):
+        if self._state.adding or not self.pk:
+            return True
+
+        if update_fields is not None:
+            update_fields = set(update_fields)
+            if not update_fields & CAMPOS_RECALCULO_MATERIAL:
+                return False
+
+        try:
+            ingreso_previo = Ingreso.objects.filter(pk=self.pk).values(
+                *CAMPOS_RECALCULO_MATERIAL,
+            ).get()
+        except Ingreso.DoesNotExist:
+            return True
+
+        return any(
+            ingreso_previo[campo] != getattr(self, campo)
+            for campo in CAMPOS_RECALCULO_MATERIAL
+        )
+
     def save(self, *args, **kwargs):
         update_fields = kwargs.get("update_fields")
         esquema_asignado = self.asignar_esquema_predeterminado()
 
         self.validar_canal_y_esquema_comision()
+        self.validar_material()
 
-        debe_recalcular = self._debe_recalcular_comision(update_fields=update_fields)
-        if debe_recalcular or esquema_asignado:
+        debe_recalcular_comision = self._debe_recalcular_comision(
+            update_fields=update_fields,
+        )
+        debe_recalcular_material = self._debe_recalcular_material(
+            update_fields=update_fields,
+        )
+
+        campos_extra_update = set()
+        if debe_recalcular_comision or esquema_asignado:
             self.calcular_comision()
+            campos_extra_update |= CAMPOS_CALCULADOS_COMISION | {"esquema_comision"}
 
-            if update_fields is not None:
-                kwargs["update_fields"] = (
-                    set(update_fields)
-                    | CAMPOS_CALCULADOS_COMISION
-                    | {"esquema_comision"}
-                )
+        if debe_recalcular_material:
+            self.calcular_material()
+            campos_extra_update |= CAMPOS_CALCULADOS_MATERIAL
+
+        if update_fields is not None and campos_extra_update:
+            kwargs["update_fields"] = set(update_fields) | campos_extra_update
 
         super().save(*args, **kwargs)
