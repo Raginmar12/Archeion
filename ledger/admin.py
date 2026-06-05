@@ -15,12 +15,12 @@ from .models import (
 class ConceptoIngresoAdmin(admin.ModelAdmin):
     list_display = (
         "nombre",
-        "incluye_material",
+        "permite_material_adicional",
         "monto_material_sugerido",
         "activo",
     )
     search_fields = ("nombre", "descripcion")
-    list_filter = ("incluye_material", "activo")
+    list_filter = ("permite_material_adicional", "activo")
 
 
 @admin.register(MetodoPago)
@@ -80,14 +80,13 @@ class GastoMaterialAdmin(admin.ModelAdmin):
 class IngresoAdmin(admin.ModelAdmin):
     list_display = (
         "fecha",
-        "monto_bruto",
+        "monto_procedimiento",
+        "monto_material_cobrado",
+        "monto_total",
         "comision",
         "monto_neto",
-        "monto_material_cobrado",
         "material_recuperado",
         "material_excedente",
-        "pool_material_antes",
-        "pool_material_despues",
         "concepto",
         "metodo_pago_derivado",
         "canal_cobro",
@@ -104,7 +103,7 @@ class IngresoAdmin(admin.ModelAdmin):
     )
     list_filter = (
         "concepto",
-        "concepto__incluye_material",
+        "concepto__permite_material_adicional",
         "canal_cobro",
         "canal_cobro__metodo_pago",
         "esquema_comision",

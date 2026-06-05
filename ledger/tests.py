@@ -67,7 +67,7 @@ class LedgerComisionesTests(TestCase):
         self.concepto = ConceptoIngreso.objects.create(nombre="Consulta")
         self.concepto_material = ConceptoIngreso.objects.create(
             nombre="Consulta con material",
-            incluye_material=True,
+            permite_material_adicional=True,
             monto_material_sugerido=Decimal("50.00"),
         )
         self.origen = OrigenIngreso.objects.create(nombre="Consultorio")
@@ -75,7 +75,7 @@ class LedgerComisionesTests(TestCase):
     def crear_ingreso(self, **kwargs):
         datos = {
             "fecha": timezone.now(),
-            "monto_bruto": Decimal("300.00"),
+            "monto_procedimiento": Decimal("300.00"),
             "concepto": self.concepto,
             "canal_cobro": self.canal_tap,
             "origen": self.origen,
@@ -135,9 +135,23 @@ class LedgerComisionesTests(TestCase):
 
         self.assertEqual(ingreso.metodo_pago, self.metodo_tarjeta)
         self.assertEqual(ingreso.esquema_comision, self.esquema_mercado_pago)
+        self.assertEqual(ingreso.monto_total, Decimal("300.00"))
         self.assertEqual(ingreso.porcentaje_comision_aplicado, Decimal("4.0600"))
         self.assertEqual(ingreso.comision, Decimal("12.18"))
         self.assertEqual(ingreso.monto_neto, Decimal("287.82"))
+
+    def test_ingreso_con_material_calcula_total_y_comision_sobre_total(self):
+        ingreso = self.crear_ingreso(
+            monto_procedimiento=Decimal("550.00"),
+            concepto=self.concepto_material,
+            monto_material_cobrado=Decimal("500.00"),
+            canal_cobro=self.canal_tap,
+        )
+
+        self.assertEqual(ingreso.monto_total, Decimal("1050.00"))
+        self.assertEqual(ingreso.porcentaje_comision_aplicado, Decimal("4.0600"))
+        self.assertEqual(ingreso.comision, Decimal("42.63"))
+        self.assertEqual(ingreso.monto_neto, Decimal("1007.37"))
 
     def test_ingreso_point_air_usa_mismo_esquema_y_calcula_comision(self):
         ingreso = self.crear_ingreso(canal_cobro=self.canal_point_air)
@@ -156,7 +170,7 @@ class LedgerComisionesTests(TestCase):
         esquema_tap = self.crear_esquema_tap_299()
         ingreso = Ingreso(
             fecha=timezone.now(),
-            monto_bruto=Decimal("300.00"),
+            monto_procedimiento=Decimal("300.00"),
             concepto=self.concepto,
             canal_cobro=self.canal_point_air,
             esquema_comision=esquema_tap,
@@ -188,10 +202,10 @@ class LedgerComisionesTests(TestCase):
         self.assertEqual(ingreso.comision, Decimal("12.18"))
         self.assertEqual(ingreso.monto_neto, Decimal("287.82"))
 
-    def test_cambiar_monto_bruto_recalcula_comision(self):
+    def test_cambiar_monto_procedimiento_recalcula_comision(self):
         ingreso = self.crear_ingreso(canal_cobro=self.canal_tap)
 
-        ingreso.monto_bruto = Decimal("600.00")
+        ingreso.monto_procedimiento = Decimal("600.00")
         ingreso.save()
         ingreso.refresh_from_db()
 
@@ -214,11 +228,25 @@ class LedgerComisionesTests(TestCase):
         self.assertEqual(ingreso.comision, Decimal("12.18"))
         self.assertEqual(ingreso.monto_neto, Decimal("287.82"))
 
-    def test_ingreso_con_comision_manual_no_sobrescribe_comision(self):
+    def test_comision_manual_con_total_cero_evitar_division_entre_cero(self):
         ingreso = self.crear_ingreso(
+            monto_procedimiento=Decimal("0.00"),
+            comision_manual=True,
+            comision=Decimal("0.00"),
+        )
+
+        self.assertEqual(ingreso.monto_total, Decimal("0.00"))
+        self.assertEqual(ingreso.monto_neto, Decimal("0.00"))
+        self.assertEqual(ingreso.porcentaje_comision_aplicado, Decimal("0.0000"))
+
+    def test_ingreso_con_comision_manual_usa_total_con_material(self):
+        ingreso = self.crear_ingreso(
+            monto_procedimiento=Decimal("550.00"),
+            concepto=self.concepto_material,
+            monto_material_cobrado=Decimal("500.00"),
             canal_cobro=self.canal_tap,
             comision_manual=True,
-            comision=Decimal("15.00"),
+            comision=Decimal("42.00"),
         )
 
         self.esquema_mercado_pago.porcentaje_base = Decimal("10.0000")
@@ -227,9 +255,10 @@ class LedgerComisionesTests(TestCase):
         ingreso.save()
         ingreso.refresh_from_db()
 
-        self.assertEqual(ingreso.comision, Decimal("15.00"))
-        self.assertEqual(ingreso.monto_neto, Decimal("285.00"))
-        self.assertEqual(ingreso.porcentaje_comision_aplicado, Decimal("5.0000"))
+        self.assertEqual(ingreso.monto_total, Decimal("1050.00"))
+        self.assertEqual(ingreso.comision, Decimal("42.00"))
+        self.assertEqual(ingreso.monto_neto, Decimal("1008.00"))
+        self.assertEqual(ingreso.porcentaje_comision_aplicado, Decimal("4.0000"))
 
 
     def test_gasto_material_aumenta_pool(self):
@@ -304,7 +333,9 @@ class LedgerComisionesTests(TestCase):
             monto=Decimal("100.00"),
             descripcion="Material posterior",
         )
-        ingreso.notas = "Editar notas no debe recalcular material"
+        self.esquema_mercado_pago.porcentaje_base = Decimal("10.0000")
+        self.esquema_mercado_pago.save()
+        ingreso.notas = "Editar notas no debe recalcular comisión ni material"
         ingreso.save()
         ingreso.refresh_from_db()
 
@@ -312,6 +343,10 @@ class LedgerComisionesTests(TestCase):
         self.assertEqual(ingreso.material_recuperado, Decimal("50.00"))
         self.assertEqual(ingreso.material_excedente, Decimal("0.00"))
         self.assertEqual(ingreso.pool_material_despues, Decimal("450.00"))
+        self.assertEqual(ingreso.monto_total, Decimal("350.00"))
+        self.assertEqual(ingreso.porcentaje_comision_aplicado, Decimal("4.0600"))
+        self.assertEqual(ingreso.comision, Decimal("14.21"))
+        self.assertEqual(ingreso.monto_neto, Decimal("335.79"))
 
     def test_cambiar_monto_material_cobrado_recalcula_material(self):
         GastoMaterial.objects.create(
@@ -332,15 +367,31 @@ class LedgerComisionesTests(TestCase):
         self.assertEqual(ingreso.material_recuperado, Decimal("120.00"))
         self.assertEqual(ingreso.material_excedente, Decimal("0.00"))
         self.assertEqual(ingreso.pool_material_despues, Decimal("380.00"))
+        self.assertEqual(ingreso.monto_total, Decimal("420.00"))
+        self.assertEqual(ingreso.comision, Decimal("17.05"))
+        self.assertEqual(ingreso.monto_neto, Decimal("402.95"))
 
-    def test_no_permite_material_cobrado_si_concepto_no_incluye_material(self):
-        with self.assertRaises(ValidationError):
+    def test_permite_material_cobrado_si_concepto_permite_material_adicional(self):
+        ingreso = self.crear_ingreso(
+            concepto=self.concepto_material,
+            monto_material_cobrado=Decimal("50.00"),
+        )
+
+        self.assertEqual(ingreso.monto_material_cobrado, Decimal("50.00"))
+
+    def test_no_permite_material_cobrado_si_concepto_no_permite_material_adicional(self):
+        with self.assertRaises(ValidationError) as contexto:
             self.crear_ingreso(
                 concepto=self.concepto,
                 monto_material_cobrado=Decimal("50.00"),
             )
 
-    def test_permite_concepto_con_material_sin_material_cobrado(self):
+        self.assertEqual(
+            contexto.exception.message_dict["monto_material_cobrado"],
+            ["Este concepto no permite cobrar material adicional."],
+        )
+
+    def test_permite_cero_si_concepto_permite_material_adicional(self):
         ingreso = self.crear_ingreso(
             concepto=self.concepto_material,
             monto_material_cobrado=Decimal("0.00"),
