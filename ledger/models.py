@@ -32,6 +32,21 @@ CAMPOS_CALCULADOS_MATERIAL = {
 }
 
 
+PESOS_DECIMALES = Decimal("0.01")
+PORCENTAJE_DECIMALES = Decimal("0.0000")
+CAMPOS_RECALCULO_COMISION = {
+    "monto_bruto",
+    "esquema_comision_id",
+    "comision_manual",
+    "comision",
+}
+CAMPOS_CALCULADOS_COMISION = {
+    "porcentaje_comision_aplicado",
+    "comision",
+    "monto_neto",
+}
+
+
 class ConceptoIngreso(models.Model):
     nombre = models.CharField(max_length=100, unique=True)
     descripcion = models.TextField(blank=True)
