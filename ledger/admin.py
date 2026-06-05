@@ -80,14 +80,13 @@ class GastoMaterialAdmin(admin.ModelAdmin):
 class IngresoAdmin(admin.ModelAdmin):
     list_display = (
         "fecha",
-        "monto_bruto",
+        "monto_procedimiento",
+        "monto_material_cobrado",
+        "monto_total",
         "comision",
         "monto_neto",
-        "monto_material_cobrado",
         "material_recuperado",
         "material_excedente",
-        "pool_material_antes",
-        "pool_material_despues",
         "concepto",
         "metodo_pago_derivado",
         "canal_cobro",

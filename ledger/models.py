@@ -8,7 +8,8 @@ from django.db.models import Sum
 PESOS_DECIMALES = Decimal("0.01")
 PORCENTAJE_DECIMALES = Decimal("0.0000")
 CAMPOS_RECALCULO_COMISION = {
-    "monto_bruto",
+    "monto_procedimiento",
+    "monto_material_cobrado",
     "canal_cobro_id",
     "esquema_comision_id",
     "comision_manual",
@@ -19,6 +20,7 @@ CAMPOS_RECALCULO_COMISION_UPDATE_FIELDS = CAMPOS_RECALCULO_COMISION | {
     "esquema_comision",
 }
 CAMPOS_CALCULADOS_COMISION = {
+    "monto_total",
     "porcentaje_comision_aplicado",
     "comision",
     "monto_neto",
@@ -29,21 +31,6 @@ CAMPOS_CALCULADOS_MATERIAL = {
     "material_excedente",
     "pool_material_antes",
     "pool_material_despues",
-}
-
-
-PESOS_DECIMALES = Decimal("0.01")
-PORCENTAJE_DECIMALES = Decimal("0.0000")
-CAMPOS_RECALCULO_COMISION = {
-    "monto_bruto",
-    "esquema_comision_id",
-    "comision_manual",
-    "comision",
-}
-CAMPOS_CALCULADOS_COMISION = {
-    "porcentaje_comision_aplicado",
-    "comision",
-    "monto_neto",
 }
 
 
@@ -202,7 +189,12 @@ class GastoMaterial(models.Model):
 
 class Ingreso(models.Model):
     fecha = models.DateTimeField()
-    monto_bruto = models.DecimalField(max_digits=10, decimal_places=2)
+    monto_procedimiento = models.DecimalField(max_digits=10, decimal_places=2)
+    monto_total = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        default=Decimal("0.00"),
+    )
 
     concepto = models.ForeignKey(
         ConceptoIngreso,
@@ -282,7 +274,7 @@ class Ingreso(models.Model):
         verbose_name_plural = "ingresos"
 
     def __str__(self):
-        return f"{self.fecha.date()} - {self.concepto} - ${self.monto_bruto}"
+        return f"{self.fecha.date()} - {self.concepto} - ${self.monto_total}"
 
     @property
     def metodo_pago(self):
@@ -397,18 +389,31 @@ class Ingreso(models.Model):
         self.validar_material()
 
     def calcular_comision(self):
-        monto_bruto = (self.monto_bruto or Decimal("0.00")).quantize(PESOS_DECIMALES)
+        monto_procedimiento = (
+            self.monto_procedimiento or Decimal("0.00")
+        ).quantize(PESOS_DECIMALES, rounding=ROUND_HALF_UP)
+        monto_material_cobrado = (
+            self.monto_material_cobrado or Decimal("0.00")
+        ).quantize(PESOS_DECIMALES, rounding=ROUND_HALF_UP)
+
+        self.monto_procedimiento = monto_procedimiento
+        self.monto_material_cobrado = monto_material_cobrado
+        self.monto_total = (monto_procedimiento + monto_material_cobrado).quantize(
+            PESOS_DECIMALES,
+        )
 
         if self.comision_manual:
             self.comision = (self.comision or Decimal("0.00")).quantize(
                 PESOS_DECIMALES,
                 rounding=ROUND_HALF_UP,
             )
-            self.monto_neto = (monto_bruto - self.comision).quantize(PESOS_DECIMALES)
-
-            if monto_bruto:
+            self.monto_neto = (self.monto_total - self.comision).quantize(
+                PESOS_DECIMALES,
+            )
+            self.porcentaje_comision_aplicado = Decimal("0.0000")
+            if self.monto_total:
                 self.porcentaje_comision_aplicado = (
-                    (self.comision / monto_bruto) * Decimal("100")
+                    (self.comision / self.monto_total) * Decimal("100")
                 ).quantize(PORCENTAJE_DECIMALES, rounding=ROUND_HALF_UP)
             return
 
@@ -418,11 +423,11 @@ class Ingreso(models.Model):
             PORCENTAJE_DECIMALES,
             rounding=ROUND_HALF_UP,
         )
-        self.comision = ((monto_bruto * porcentaje) / Decimal("100")).quantize(
+        self.comision = ((self.monto_total * porcentaje) / Decimal("100")).quantize(
             PESOS_DECIMALES,
             rounding=ROUND_HALF_UP,
         )
-        self.monto_neto = (monto_bruto - self.comision).quantize(PESOS_DECIMALES)
+        self.monto_neto = (self.monto_total - self.comision).quantize(PESOS_DECIMALES)
 
     def _debe_recalcular_comision(self, update_fields=None):
         if self._state.adding or not self.pk:
@@ -481,13 +486,13 @@ class Ingreso(models.Model):
         )
 
         campos_extra_update = set()
-        if debe_recalcular_comision or esquema_asignado:
-            self.calcular_comision()
-            campos_extra_update |= CAMPOS_CALCULADOS_COMISION | {"esquema_comision"}
-
         if debe_recalcular_material:
             self.calcular_material()
             campos_extra_update |= CAMPOS_CALCULADOS_MATERIAL
+
+        if debe_recalcular_comision or esquema_asignado:
+            self.calcular_comision()
+            campos_extra_update |= CAMPOS_CALCULADOS_COMISION | {"esquema_comision"}
 
         if update_fields is not None and campos_extra_update:
             kwargs["update_fields"] = set(update_fields) | campos_extra_update
