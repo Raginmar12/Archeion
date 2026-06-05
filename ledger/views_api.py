@@ -80,23 +80,40 @@ def _serializar_origen_ingreso(origen):
 
 @require_GET
 def catalogos(request):
-    generated_at = timezone.now()
+    generated_at = timezone.now().replace(microsecond=0)
     generated_at_iso = generated_at.isoformat().replace("+00:00", "Z")
 
-    metodos_pago = MetodoPago.objects.filter(activo=True)
-    canales_cobro = CanalCobro.objects.filter(activo=True).select_related(
-        "metodo_pago",
-        "esquema_comision_predeterminado",
+    metodos_pago = MetodoPago.objects.filter(activo=True).order_by("nombre", "id")
+    canales_cobro = (
+        CanalCobro.objects.filter(activo=True)
+        .select_related(
+            "metodo_pago",
+            "esquema_comision_predeterminado",
+        )
+        .order_by("nombre", "id")
     )
-    esquemas_comision = EsquemaComision.objects.filter(activo=True).prefetch_related(
-        Prefetch(
-            "canales_cobro",
-            queryset=CanalCobro.objects.filter(activo=True),
-            to_attr="canales_cobro_activos",
-        ),
+    esquemas_comision = (
+        EsquemaComision.objects.filter(activo=True)
+        .prefetch_related(
+            Prefetch(
+                "canales_cobro",
+                queryset=CanalCobro.objects.filter(activo=True).order_by(
+                    "nombre",
+                    "id",
+                ),
+                to_attr="canales_cobro_activos",
+            ),
+        )
+        .order_by("nombre", "id")
     )
-    conceptos_ingreso = ConceptoIngreso.objects.filter(activo=True)
-    origenes_ingreso = OrigenIngreso.objects.filter(activo=True)
+    conceptos_ingreso = ConceptoIngreso.objects.filter(activo=True).order_by(
+        "nombre",
+        "id",
+    )
+    origenes_ingreso = OrigenIngreso.objects.filter(activo=True).order_by(
+        "nombre",
+        "id",
+    )
 
     return JsonResponse(
         {

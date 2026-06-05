@@ -86,12 +86,22 @@ class CatalogosApiTests(TestCase):
 
         self.assertEqual(response.status_code, 401)
 
-    @patch("ledger.views_api.timezone.now")
-    def test_devuelve_metadatos_y_catalogos(self, now):
-        now.return_value = datetime(2026, 6, 4, 23, 10, tzinfo=datetime_timezone.utc)
+    @patch("ledger.views_api.timezone")
+    def test_devuelve_metadatos_y_catalogos(self, timezone_mock):
+        timezone_mock.now.return_value = datetime(
+            2026,
+            6,
+            4,
+            23,
+            10,
+            0,
+            987654,
+            tzinfo=datetime_timezone.utc,
+        )
 
         data = self.get_catalogos().json()
 
+        timezone_mock.now.assert_called_once_with()
         self.assertEqual(data["schema_version"], 1)
         self.assertEqual(data["generated_at"], "2026-06-04T23:10:00Z")
         self.assertEqual(data["snapshot_id"], "cat_2026-06-04T23:10:00Z")
@@ -128,6 +138,60 @@ class CatalogosApiTests(TestCase):
         self.assertEqual(
             {item["nombre"] for item in catalogs["origenes_ingreso"]},
             {self.origen.nombre},
+        )
+
+    def test_catalogos_y_canales_de_esquemas_tienen_orden_estable(self):
+        metodo_alfabetico = MetodoPago.objects.create(nombre="A método")
+        canal_alfabetico = CanalCobro.objects.create(
+            nombre="A canal",
+            metodo_pago=metodo_alfabetico,
+        )
+        esquema_alfabetico = EsquemaComision.objects.create(
+            nombre="A esquema",
+            porcentaje_base=Decimal("0.0000"),
+        )
+        concepto_alfabetico = ConceptoIngreso.objects.create(nombre="A concepto")
+        origen_alfabetico = OrigenIngreso.objects.create(nombre="A origen")
+        self.esquema.canales_cobro.add(canal_alfabetico, self.canal_sin_esquema)
+
+        catalogs = self.get_catalogos().json()["catalogs"]
+
+        self.assertEqual(
+            [item["id"] for item in catalogs["metodos_pago"]],
+            [metodo_alfabetico.id, self.metodo.id],
+        )
+        self.assertEqual(
+            [item["id"] for item in catalogs["canales_cobro"]],
+            [canal_alfabetico.id, self.canal.id, self.canal_sin_esquema.id],
+        )
+        self.assertEqual(
+            [item["id"] for item in catalogs["esquemas_comision"]],
+            [esquema_alfabetico.id, self.esquema.id],
+        )
+        self.assertEqual(
+            [item["id"] for item in catalogs["conceptos_ingreso"]],
+            [concepto_alfabetico.id, self.concepto.id],
+        )
+        self.assertEqual(
+            [item["id"] for item in catalogs["origenes_ingreso"]],
+            [origen_alfabetico.id, self.origen.id],
+        )
+        esquema = next(
+            item
+            for item in catalogs["esquemas_comision"]
+            if item["id"] == self.esquema.id
+        )
+        self.assertEqual(
+            esquema["canales_cobro_ids"],
+            [canal_alfabetico.id, self.canal.id, self.canal_sin_esquema.id],
+        )
+        self.assertEqual(
+            esquema["canales_cobro_public_ids"],
+            [
+                str(canal_alfabetico.public_id),
+                str(self.canal.public_id),
+                str(self.canal_sin_esquema.public_id),
+            ],
         )
 
     def test_todos_los_catalogos_incluyen_public_id_como_string(self):
