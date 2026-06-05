@@ -17,6 +17,9 @@ Including another URLconf
 from django.contrib import admin
 from django.urls import path
 
+from .views import device_ping
+
 urlpatterns = [
     path('admin/', admin.site.urls),
+    path('api/device/ping/', device_ping, name='device-ping'),
 ]
