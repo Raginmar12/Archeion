@@ -13,6 +13,7 @@ from .models import (
 
 @admin.register(ConceptoIngreso)
 class ConceptoIngresoAdmin(admin.ModelAdmin):
+    readonly_fields = ("public_id",)
     list_display = (
         "nombre",
         "permite_material_adicional",
@@ -25,6 +26,7 @@ class ConceptoIngresoAdmin(admin.ModelAdmin):
 
 @admin.register(MetodoPago)
 class MetodoPagoAdmin(admin.ModelAdmin):
+    readonly_fields = ("public_id",)
     list_display = ("nombre", "activo")
     search_fields = ("nombre",)
     list_filter = ("activo",)
@@ -32,6 +34,7 @@ class MetodoPagoAdmin(admin.ModelAdmin):
 
 @admin.register(CanalCobro)
 class CanalCobroAdmin(admin.ModelAdmin):
+    readonly_fields = ("public_id",)
     list_display = (
         "nombre",
         "metodo_pago",
@@ -48,6 +51,7 @@ class CanalCobroAdmin(admin.ModelAdmin):
 
 @admin.register(EsquemaComision)
 class EsquemaComisionAdmin(admin.ModelAdmin):
+    readonly_fields = ("public_id",)
     list_display = (
         "nombre",
         "porcentaje_base",
@@ -63,6 +67,7 @@ class EsquemaComisionAdmin(admin.ModelAdmin):
 
 @admin.register(OrigenIngreso)
 class OrigenIngresoAdmin(admin.ModelAdmin):
+    readonly_fields = ("public_id",)
     list_display = ("nombre", "activo")
     search_fields = ("nombre", "descripcion")
     list_filter = ("activo",)

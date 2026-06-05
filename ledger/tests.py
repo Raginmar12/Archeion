@@ -1,6 +1,9 @@
 from decimal import Decimal
+from uuid import UUID
 
+from django.contrib import admin
 from django.core.exceptions import ValidationError
+from django.forms import modelform_factory
 from django.test import TestCase
 from django.utils import timezone
 
@@ -13,6 +16,80 @@ from .models import (
     MetodoPago,
     OrigenIngreso,
 )
+
+
+class CatalogosPublicIdTests(TestCase):
+    modelos_catalogo = (
+        MetodoPago,
+        CanalCobro,
+        EsquemaComision,
+        ConceptoIngreso,
+        OrigenIngreso,
+    )
+
+    def crear_metodo_pago(self, sufijo):
+        return MetodoPago.objects.create(nombre=f"Método {sufijo}")
+
+    def crear_canal_cobro(self, sufijo):
+        metodo = MetodoPago.objects.create(nombre=f"Método canal {sufijo}")
+        return CanalCobro.objects.create(
+            nombre=f"Canal {sufijo}",
+            metodo_pago=metodo,
+        )
+
+    def crear_esquema_comision(self, sufijo):
+        return EsquemaComision.objects.create(
+            nombre=f"Esquema {sufijo}",
+            porcentaje_base=Decimal("0.0000"),
+        )
+
+    def crear_concepto_ingreso(self, sufijo):
+        return ConceptoIngreso.objects.create(nombre=f"Concepto {sufijo}")
+
+    def crear_origen_ingreso(self, sufijo):
+        return OrigenIngreso.objects.create(nombre=f"Origen {sufijo}")
+
+    def test_catalogos_generan_public_id_uuid_unico_y_conservan_id_entero(self):
+        fabricas = (
+            self.crear_metodo_pago,
+            self.crear_canal_cobro,
+            self.crear_esquema_comision,
+            self.crear_concepto_ingreso,
+            self.crear_origen_ingreso,
+        )
+
+        for fabrica in fabricas:
+            with self.subTest(catalogo=fabrica.__name__):
+                primero = fabrica("A")
+                segundo = fabrica("B")
+
+                self.assertIsInstance(primero.pk, int)
+                self.assertIsInstance(primero.public_id, UUID)
+                self.assertIsNotNone(primero.public_id)
+                self.assertNotEqual(primero.public_id, segundo.public_id)
+
+                public_id_original = primero.public_id
+                primero.activo = False
+                primero.save()
+                primero.refresh_from_db()
+                self.assertEqual(primero.public_id, public_id_original)
+
+    def test_public_id_es_unico_y_no_editable_en_cada_modelo(self):
+        for modelo in self.modelos_catalogo:
+            with self.subTest(catalogo=modelo.__name__):
+                campo = modelo._meta.get_field("public_id")
+
+                self.assertTrue(campo.unique)
+                self.assertFalse(campo.editable)
+                self.assertNotIn(
+                    "public_id",
+                    modelform_factory(modelo, fields="__all__").base_fields,
+                )
+
+    def test_admin_muestra_public_id_como_readonly(self):
+        for modelo in self.modelos_catalogo:
+            with self.subTest(catalogo=modelo.__name__):
+                self.assertIn("public_id", admin.site._registry[modelo].readonly_fields)
 
 
 class LedgerComisionesTests(TestCase):

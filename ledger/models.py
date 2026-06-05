@@ -1,3 +1,4 @@
+import uuid
 from decimal import Decimal, ROUND_HALF_UP
 
 from django.core.exceptions import ValidationError
@@ -35,6 +36,7 @@ CAMPOS_CALCULADOS_MATERIAL = {
 
 
 class ConceptoIngreso(models.Model):
+    public_id = models.UUIDField(default=uuid.uuid4, unique=True, editable=False)
     nombre = models.CharField(max_length=100, unique=True)
     descripcion = models.TextField(blank=True)
     permite_material_adicional = models.BooleanField(
@@ -59,6 +61,7 @@ class ConceptoIngreso(models.Model):
 
 
 class MetodoPago(models.Model):
+    public_id = models.UUIDField(default=uuid.uuid4, unique=True, editable=False)
     nombre = models.CharField(max_length=50, unique=True)
     activo = models.BooleanField(default=True)
 
@@ -72,6 +75,7 @@ class MetodoPago(models.Model):
 
 
 class CanalCobro(models.Model):
+    public_id = models.UUIDField(default=uuid.uuid4, unique=True, editable=False)
     nombre = models.CharField(max_length=100, unique=True)
     metodo_pago = models.ForeignKey(
         MetodoPago,
@@ -120,6 +124,7 @@ class CanalCobro(models.Model):
 
 
 class EsquemaComision(models.Model):
+    public_id = models.UUIDField(default=uuid.uuid4, unique=True, editable=False)
     canales_cobro = models.ManyToManyField(
         "CanalCobro",
         related_name="esquemas_comision",
@@ -157,6 +162,7 @@ class EsquemaComision(models.Model):
 
 
 class OrigenIngreso(models.Model):
+    public_id = models.UUIDField(default=uuid.uuid4, unique=True, editable=False)
     nombre = models.CharField(max_length=100, unique=True)
     descripcion = models.TextField(blank=True)
     activo = models.BooleanField(default=True)
