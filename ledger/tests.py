@@ -67,7 +67,7 @@ class LedgerComisionesTests(TestCase):
         self.concepto = ConceptoIngreso.objects.create(nombre="Consulta")
         self.concepto_material = ConceptoIngreso.objects.create(
             nombre="Consulta con material",
-            incluye_material=True,
+            permite_material_adicional=True,
             monto_material_sugerido=Decimal("50.00"),
         )
         self.origen = OrigenIngreso.objects.create(nombre="Consultorio")
@@ -333,14 +333,27 @@ class LedgerComisionesTests(TestCase):
         self.assertEqual(ingreso.material_excedente, Decimal("0.00"))
         self.assertEqual(ingreso.pool_material_despues, Decimal("380.00"))
 
-    def test_no_permite_material_cobrado_si_concepto_no_incluye_material(self):
-        with self.assertRaises(ValidationError):
+    def test_permite_material_cobrado_si_concepto_permite_material_adicional(self):
+        ingreso = self.crear_ingreso(
+            concepto=self.concepto_material,
+            monto_material_cobrado=Decimal("50.00"),
+        )
+
+        self.assertEqual(ingreso.monto_material_cobrado, Decimal("50.00"))
+
+    def test_no_permite_material_cobrado_si_concepto_no_permite_material_adicional(self):
+        with self.assertRaises(ValidationError) as contexto:
             self.crear_ingreso(
                 concepto=self.concepto,
                 monto_material_cobrado=Decimal("50.00"),
             )
 
-    def test_permite_concepto_con_material_sin_material_cobrado(self):
+        self.assertEqual(
+            contexto.exception.message_dict["monto_material_cobrado"],
+            ["Este concepto no permite cobrar material adicional."],
+        )
+
+    def test_permite_cero_si_concepto_permite_material_adicional(self):
         ingreso = self.crear_ingreso(
             concepto=self.concepto_material,
             monto_material_cobrado=Decimal("0.00"),

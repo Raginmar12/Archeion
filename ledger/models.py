@@ -50,11 +50,15 @@ CAMPOS_CALCULADOS_COMISION = {
 class ConceptoIngreso(models.Model):
     nombre = models.CharField(max_length=100, unique=True)
     descripcion = models.TextField(blank=True)
-    incluye_material = models.BooleanField(default=False)
+    permite_material_adicional = models.BooleanField(
+        default=False,
+        verbose_name="permite material adicional",
+    )
     monto_material_sugerido = models.DecimalField(
         max_digits=10,
         decimal_places=2,
         default=Decimal("0.00"),
+        verbose_name="monto material sugerido",
     )
     activo = models.BooleanField(default=True)
 
@@ -323,13 +327,12 @@ class Ingreso(models.Model):
 
         if (
             monto_material_cobrado > Decimal("0.00")
-            and not self.concepto.incluye_material
+            and not self.concepto.permite_material_adicional
         ):
             raise ValidationError(
                 {
                     "monto_material_cobrado": (
-                        "No se puede cobrar material en un concepto que no "
-                        "incluye material."
+                        "Este concepto no permite cobrar material adicional."
                     ),
                 },
             )
