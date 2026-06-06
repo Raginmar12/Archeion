@@ -28,7 +28,7 @@ DEBUG = True
 
 CODEX_DEVICE_TOKEN = os.environ.get("CODEX_DEVICE_TOKEN", "")
 
-ALLOWED_HOSTS = ["codexhub.local", "localhost", "127.0.0.1"]
+ALLOWED_HOSTS = ["codexhub.local", "localhost", "127.0.0.1", "192.168.100.13"]
 
 
 # Application definition
