@@ -228,6 +228,7 @@ def _serializar_origen_ingreso(origen):
         "id": origen.id,
         "public_id": str(origen.public_id),
         "nombre": origen.nombre,
+        "descripcion": origen.descripcion,
     }
 
 

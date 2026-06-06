@@ -64,7 +64,13 @@ class CatalogosApiTests(TestCase):
             nombre="Concepto inactivo",
             activo=False,
         )
-        self.origen = OrigenIngreso.objects.create(nombre="Consultorio")
+        self.origen = OrigenIngreso.objects.create(
+            nombre="Consultorio",
+            descripcion="Consultorio principal",
+        )
+        self.origen_sin_descripcion = OrigenIngreso.objects.create(
+            nombre="Mostrador sin descripción",
+        )
         self.origen_inactivo = OrigenIngreso.objects.create(
             nombre="Origen inactivo",
             activo=False,
@@ -139,7 +145,7 @@ class CatalogosApiTests(TestCase):
         )
         self.assertEqual(
             {item["nombre"] for item in catalogs["origenes_ingreso"]},
-            {self.origen.nombre},
+            {self.origen.nombre, self.origen_sin_descripcion.nombre},
         )
 
     def test_catalogos_y_canales_de_esquemas_tienen_orden_estable(self):
@@ -176,7 +182,11 @@ class CatalogosApiTests(TestCase):
         )
         self.assertEqual(
             [item["id"] for item in catalogs["origenes_ingreso"]],
-            [origen_alfabetico.id, self.origen.id],
+            [
+                origen_alfabetico.id,
+                self.origen.id,
+                self.origen_sin_descripcion.id,
+            ],
         )
         esquema = next(
             item
@@ -250,6 +260,18 @@ class CatalogosApiTests(TestCase):
 
         self.assertTrue(concepto["permite_material_adicional"])
         self.assertEqual(concepto["monto_material_sugerido"], "50.00")
+
+    def test_origenes_incluyen_descripcion_como_string(self):
+        origenes = self.get_catalogos().json()["catalogs"]["origenes_ingreso"]
+        origen = next(item for item in origenes if item["id"] == self.origen.id)
+        origen_sin_descripcion = next(
+            item for item in origenes if item["id"] == self.origen_sin_descripcion.id
+        )
+
+        self.assertIsInstance(origen["descripcion"], str)
+        self.assertEqual(origen["descripcion"], "Consultorio principal")
+        self.assertIsInstance(origen_sin_descripcion["descripcion"], str)
+        self.assertEqual(origen_sin_descripcion["descripcion"], "")
 
     def test_decimales_se_devuelven_como_strings(self):
         catalogs = self.get_catalogos().json()["catalogs"]
