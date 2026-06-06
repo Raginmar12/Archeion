@@ -14,15 +14,21 @@ Including another URLconf
     1. Import the include() function: from django.urls import include, path
     2. Add a URL to urlpatterns:  path('blog/', include('blog.urls'))
 """
+
 from django.contrib import admin
 from django.urls import path
 
-from ledger.views_api import catalogos
+from ledger.views_api import catalogos, chremata_schema
 
 from .views import device_ping
 
 urlpatterns = [
-    path('admin/', admin.site.urls),
-    path('api/device/ping/', device_ping, name='device-ping'),
-    path('api/v1/catalogos/', catalogos, name='api-v1-catalogos'),
+    path("admin/", admin.site.urls),
+    path("api/device/ping/", device_ping, name="device-ping"),
+    path("api/v1/catalogos/", catalogos, name="api-v1-catalogos"),
+    path(
+        "api/v1/chremata/schema/",
+        chremata_schema,
+        name="api-v1-chremata-schema",
+    ),
 ]

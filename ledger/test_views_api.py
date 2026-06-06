@@ -64,7 +64,13 @@ class CatalogosApiTests(TestCase):
             nombre="Concepto inactivo",
             activo=False,
         )
-        self.origen = OrigenIngreso.objects.create(nombre="Consultorio")
+        self.origen = OrigenIngreso.objects.create(
+            nombre="Consultorio",
+            descripcion="Consultorio principal",
+        )
+        self.origen_sin_descripcion = OrigenIngreso.objects.create(
+            nombre="Mostrador sin descripción",
+        )
         self.origen_inactivo = OrigenIngreso.objects.create(
             nombre="Origen inactivo",
             activo=False,
@@ -103,6 +109,8 @@ class CatalogosApiTests(TestCase):
 
         timezone_mock.now.assert_called_once_with()
         self.assertEqual(data["schema_version"], 1)
+        self.assertEqual(data["contract"], "chremata.catalogs.v1")
+        self.assertEqual(data["app"], "chremata")
         self.assertEqual(data["generated_at"], "2026-06-04T23:10:00Z")
         self.assertEqual(data["snapshot_id"], "cat_2026-06-04T23:10:00Z")
         self.assertEqual(
@@ -137,7 +145,7 @@ class CatalogosApiTests(TestCase):
         )
         self.assertEqual(
             {item["nombre"] for item in catalogs["origenes_ingreso"]},
-            {self.origen.nombre},
+            {self.origen.nombre, self.origen_sin_descripcion.nombre},
         )
 
     def test_catalogos_y_canales_de_esquemas_tienen_orden_estable(self):
@@ -174,7 +182,11 @@ class CatalogosApiTests(TestCase):
         )
         self.assertEqual(
             [item["id"] for item in catalogs["origenes_ingreso"]],
-            [origen_alfabetico.id, self.origen.id],
+            [
+                origen_alfabetico.id,
+                self.origen.id,
+                self.origen_sin_descripcion.id,
+            ],
         )
         esquema = next(
             item
@@ -249,6 +261,18 @@ class CatalogosApiTests(TestCase):
         self.assertTrue(concepto["permite_material_adicional"])
         self.assertEqual(concepto["monto_material_sugerido"], "50.00")
 
+    def test_origenes_incluyen_descripcion_como_string(self):
+        origenes = self.get_catalogos().json()["catalogs"]["origenes_ingreso"]
+        origen = next(item for item in origenes if item["id"] == self.origen.id)
+        origen_sin_descripcion = next(
+            item for item in origenes if item["id"] == self.origen_sin_descripcion.id
+        )
+
+        self.assertIsInstance(origen["descripcion"], str)
+        self.assertEqual(origen["descripcion"], "Consultorio principal")
+        self.assertIsInstance(origen_sin_descripcion["descripcion"], str)
+        self.assertEqual(origen_sin_descripcion["descripcion"], "")
+
     def test_decimales_se_devuelven_como_strings(self):
         catalogs = self.get_catalogos().json()["catalogs"]
         esquema = catalogs["esquemas_comision"][0]
@@ -258,3 +282,269 @@ class CatalogosApiTests(TestCase):
         self.assertIsInstance(esquema["porcentaje_iva"], str)
         self.assertIsInstance(esquema["porcentaje_total"], str)
         self.assertIsInstance(concepto["monto_material_sugerido"], str)
+
+
+@override_settings(DEBUG=False, CODEX_DEVICE_TOKEN="")
+class ChremataSchemaApiTests(TestCase):
+    def setUp(self):
+        self.device_token, self.token_completo = DeviceToken.crear("Zephyros")
+        self.url = reverse("api-v1-chremata-schema")
+
+    def get_schema(self):
+        return self.client.get(
+            self.url,
+            headers={"X-Codex-Device-Token": self.token_completo},
+        )
+
+    def catalog_field_names(self, data, catalog_name):
+        return {field["name"] for field in data["catalogs"][catalog_name]["fields"]}
+
+    def operation_payload_field_names(self, data, operation_name):
+        return {
+            field["name"]
+            for field in data["operations"][operation_name]["payload_fields"]
+        }
+
+    def test_responde_200_con_token_valido(self):
+        response = self.get_schema()
+
+        self.assertEqual(response.status_code, 200)
+
+    def test_responde_401_sin_token_cuando_hay_device_token_activo(self):
+        response = self.client.get(self.url)
+
+        self.assertEqual(response.status_code, 401)
+
+    @patch("ledger.views_api.timezone")
+    def test_incluye_metadata_y_secciones_principales(self, timezone_mock):
+        timezone_mock.now.return_value = datetime(
+            2026,
+            6,
+            6,
+            0,
+            0,
+            0,
+            123456,
+            tzinfo=datetime_timezone.utc,
+        )
+
+        data = self.get_schema().json()
+
+        timezone_mock.now.assert_called_once_with()
+        self.assertEqual(data["schema_version"], 1)
+        self.assertEqual(data["contract"], "chremata.schema.v1")
+        self.assertEqual(data["app"], "chremata")
+        self.assertEqual(data["server_role"], "archeion")
+        self.assertEqual(data["generated_at"], "2026-06-06T00:00:00Z")
+        self.assertEqual(
+            data["compatible_with"],
+            {
+                "catalogs": ["chremata.catalogs.v1"],
+                "operations": [
+                    "chremata.operation.crear_ingreso.v1",
+                    "chremata.operation.crear_gasto_material.v1",
+                ],
+                "clients": ["zephyros"],
+            },
+        )
+        self.assertIn("catalog_snapshot", data)
+        self.assertIn("catalogs", data)
+        self.assertIn("operations", data)
+
+    def test_catalog_snapshot_describe_endpoint_de_catalogos(self):
+        snapshot = self.get_schema().json()["catalog_snapshot"]
+
+        self.assertEqual(snapshot["endpoint"], "/api/v1/catalogos/")
+        self.assertEqual(snapshot["contract"], "chremata.catalogs.v1")
+        self.assertEqual(snapshot["current_schema_version"], 1)
+        self.assertEqual(snapshot["identity_field"], "public_id")
+        self.assertTrue(snapshot["contains_only_active_records"])
+        self.assertTrue(snapshot["decimals_are_strings"])
+        self.assertTrue(snapshot["uuids_are_strings"])
+        self.assertTrue(snapshot["nullable_fields_use_null"])
+
+    def test_declara_los_cinco_catalogos(self):
+        catalogs = self.get_schema().json()["catalogs"]
+
+        self.assertEqual(
+            set(catalogs),
+            {
+                "metodos_pago",
+                "canales_cobro",
+                "esquemas_comision",
+                "conceptos_ingreso",
+                "origenes_ingreso",
+            },
+        )
+        for catalog in catalogs.values():
+            self.assertEqual(catalog["identity"], "public_id")
+
+    def test_declara_campos_de_catalogos_y_relaciones_por_public_id(self):
+        data = self.get_schema().json()
+
+        self.assertEqual(
+            self.catalog_field_names(data, "metodos_pago"),
+            {"public_id", "nombre"},
+        )
+        self.assertEqual(
+            self.catalog_field_names(data, "canales_cobro"),
+            {
+                "public_id",
+                "nombre",
+                "metodo_pago_public_id",
+                "metodo_pago",
+                "esquema_comision_predeterminado_public_id",
+            },
+        )
+        canales_fields = data["catalogs"]["canales_cobro"]["fields"]
+        metodo_field = next(
+            field
+            for field in canales_fields
+            if field["name"] == "metodo_pago_public_id"
+        )
+        esquema_field = next(
+            field
+            for field in canales_fields
+            if field["name"] == "esquema_comision_predeterminado_public_id"
+        )
+        self.assertEqual(metodo_field["relation"], "metodos_pago.public_id")
+        self.assertEqual(esquema_field["relation"], "esquemas_comision.public_id")
+        self.assertFalse(esquema_field["required"])
+        self.assertTrue(esquema_field["nullable"])
+
+        esquema_fields = data["catalogs"]["esquemas_comision"]["fields"]
+        canales_relation_field = next(
+            field
+            for field in esquema_fields
+            if field["name"] == "canales_cobro_public_ids"
+        )
+        self.assertEqual(
+            canales_relation_field["relation"],
+            "canales_cobro.public_id",
+        )
+
+    def test_declara_decimales_como_decimal_string_o_money_string(self):
+        data = self.get_schema().json()
+        esquemas = {
+            field["name"]: field["type"]
+            for field in data["catalogs"]["esquemas_comision"]["fields"]
+        }
+        conceptos = {
+            field["name"]: field["type"]
+            for field in data["catalogs"]["conceptos_ingreso"]["fields"]
+        }
+        crear_ingreso = {
+            field["name"]: field["type"]
+            for field in data["operations"]["crear_ingreso"]["payload_fields"]
+        }
+        crear_gasto = {
+            field["name"]: field["type"]
+            for field in data["operations"]["crear_gasto_material"]["payload_fields"]
+        }
+
+        self.assertEqual(esquemas["porcentaje_base"], "decimal_string")
+        self.assertEqual(esquemas["porcentaje_iva"], "decimal_string")
+        self.assertEqual(esquemas["porcentaje_total"], "decimal_string")
+        self.assertEqual(conceptos["monto_material_sugerido"], "money_string")
+        self.assertEqual(crear_ingreso["monto_procedimiento"], "money_string")
+        self.assertEqual(crear_ingreso["monto_material_cobrado"], "money_string")
+        self.assertEqual(crear_gasto["monto"], "money_string")
+
+    def test_declara_operaciones_futuras(self):
+        operations = self.get_schema().json()["operations"]
+
+        self.assertEqual(set(operations), {"crear_ingreso", "crear_gasto_material"})
+        self.assertEqual(
+            operations["crear_ingreso"]["contract"],
+            "chremata.operation.crear_ingreso.v1",
+        )
+        self.assertEqual(operations["crear_ingreso"]["method"], "POST")
+        self.assertEqual(
+            operations["crear_ingreso"]["future_endpoint"],
+            "/api/v1/chremata/operations/",
+        )
+        self.assertEqual(
+            operations["crear_ingreso"]["idempotency_key"],
+            ["device_id", "device_entry_id"],
+        )
+        self.assertEqual(
+            operations["crear_ingreso"]["required_top_level_fields"],
+            [
+                "schema_version",
+                "operation_type",
+                "device_entry_id",
+                "device_id",
+                "catalog_snapshot_id",
+                "catalog_snapshot_generated_at",
+                "capturado_en_device",
+                "device_timezone",
+                "payload",
+            ],
+        )
+        self.assertEqual(
+            self.operation_payload_field_names(
+                self.get_schema().json(), "crear_ingreso"
+            ),
+            {
+                "concepto_ingreso_public_id",
+                "origen_ingreso_public_id",
+                "canal_cobro_public_id",
+                "metodo_pago_public_id",
+                "esquema_comision_public_id",
+                "monto_procedimiento",
+                "monto_material_cobrado",
+                "notas",
+            },
+        )
+        self.assertEqual(
+            operations["crear_gasto_material"]["contract"],
+            "chremata.operation.crear_gasto_material.v1",
+        )
+        self.assertEqual(
+            self.operation_payload_field_names(
+                self.get_schema().json(), "crear_gasto_material"
+            ),
+            {"fecha", "monto", "descripcion", "notas"},
+        )
+
+    def test_declara_autoridad_del_servidor_para_operaciones(self):
+        operations = self.get_schema().json()["operations"]
+
+        self.assertEqual(
+            operations["crear_ingreso"]["server_authority"],
+            {
+                "recalculates_commission": True,
+                "recalculates_material_pool": True,
+                "validates_catalog_public_ids": True,
+                "device_calculations_are_audit_snapshot": True,
+            },
+        )
+        self.assertEqual(
+            operations["crear_gasto_material"]["server_authority"],
+            {
+                "updates_material_pool": True,
+                "device_values_are_input_not_authority": True,
+            },
+        )
+
+    def test_schema_no_declara_ids_internos_como_campos_publicos(self):
+        data = self.get_schema().json()
+        campos_prohibidos = {
+            "id",
+            "metodo_pago_id",
+            "esquema_comision_predeterminado_id",
+            "canales_cobro_ids",
+        }
+
+        catalog_fields = set()
+        for catalog in data["catalogs"].values():
+            catalog_fields.update(field["name"] for field in catalog["fields"])
+
+        operation_fields = set()
+        for operation in data["operations"].values():
+            operation_fields.update(
+                field["name"] for field in operation["payload_fields"]
+            )
+
+        self.assertFalse(catalog_fields & campos_prohibidos)
+        self.assertFalse(operation_fields & campos_prohibidos)
