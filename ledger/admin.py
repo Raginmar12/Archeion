@@ -10,6 +10,7 @@ from .models import (
     OrigenIngreso,
     Ticket,
     TicketLinea,
+    TicketPago,
 )
 
 
@@ -178,3 +179,25 @@ class TicketLineaAdmin(admin.ModelAdmin):
         "notas",
     )
     list_filter = ("concepto", "ticket__estado")
+
+
+@admin.register(TicketPago)
+class TicketPagoAdmin(admin.ModelAdmin):
+    readonly_fields = ("ingreso",)
+    list_display = (
+        "ticket",
+        "ingreso",
+        "fecha",
+        "canal_cobro",
+        "esquema_comision",
+        "concepto_ingreso",
+        "creado_en",
+    )
+    search_fields = (
+        "ticket__id",
+        "ticket__public_id",
+        "ticket__nombre_referencia",
+        "ingreso__id",
+    )
+    list_filter = ("canal_cobro", "esquema_comision", "concepto_ingreso", "fecha")
+    date_hierarchy = "fecha"

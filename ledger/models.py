@@ -239,6 +239,13 @@ class Ticket(models.Model):
         referencia = f" - {self.nombre_referencia}" if self.nombre_referencia else ""
         return f"{self.fecha.date()}{referencia} - {self.estado} - ${self.monto_total}"
 
+    @property
+    def monto_total_cobrado(self):
+        return (
+            (self.monto_total or Decimal("0.00"))
+            + (self.monto_material_cobrado or Decimal("0.00"))
+        ).quantize(PESOS_DECIMALES)
+
     def recalcular_totales(self, guardar=True):
         if not self.pk:
             self.monto_total = Decimal("0.00")
@@ -679,3 +686,47 @@ class Ingreso(models.Model):
             kwargs["update_fields"] = set(update_fields) | campos_extra_update
 
         super().save(*args, **kwargs)
+
+
+class TicketPago(models.Model):
+    ticket = models.OneToOneField(
+        Ticket,
+        on_delete=models.PROTECT,
+        related_name="pago",
+    )
+    ingreso = models.OneToOneField(
+        Ingreso,
+        on_delete=models.PROTECT,
+        related_name="ticket_pago",
+    )
+    fecha = models.DateTimeField()
+    canal_cobro = models.ForeignKey(
+        CanalCobro,
+        on_delete=models.PROTECT,
+        related_name="ticket_pagos",
+    )
+    esquema_comision = models.ForeignKey(
+        EsquemaComision,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="ticket_pagos",
+    )
+    concepto_ingreso = models.ForeignKey(
+        ConceptoIngreso,
+        on_delete=models.PROTECT,
+        related_name="ticket_pagos",
+    )
+    notas = models.TextField(blank=True)
+    creado_en = models.DateTimeField(auto_now_add=True)
+    actualizado_en = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-fecha", "-id"]
+        verbose_name = "pago de ticket"
+        verbose_name_plural = "pagos de ticket"
+
+    def __str__(self):
+        return (
+            f"{self.fecha.date()} - ticket {self.ticket_id} - ingreso {self.ingreso_id}"
+        )
