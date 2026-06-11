@@ -1,4 +1,7 @@
-from django.db.models import Prefetch
+from datetime import timezone as datetime_timezone
+from decimal import Decimal
+
+from django.db.models import Max, Prefetch, Sum
 from django.http import JsonResponse
 from django.utils import timezone
 from django.views.decorators.http import require_GET
@@ -7,7 +10,10 @@ from .models import (
     CanalCobro,
     ConceptoIngreso,
     EsquemaComision,
+    GastoMaterial,
+    Ingreso,
     MetodoPago,
+    PESOS_DECIMALES,
     OrigenIngreso,
 )
 
@@ -20,9 +26,19 @@ def _decimal_o_none(valor):
     return str(valor) if valor is not None else None
 
 
+def _datetime_utc_iso(valor):
+    if valor is None:
+        return None
+    return (
+        valor.astimezone(datetime_timezone.utc)
+        .replace(microsecond=0)
+        .isoformat()
+        .replace("+00:00", "Z")
+    )
+
+
 def _generated_at_iso():
-    generated_at = timezone.now().replace(microsecond=0)
-    return generated_at.isoformat().replace("+00:00", "Z")
+    return _datetime_utc_iso(timezone.now())
 
 
 def _campo_schema(nombre, tipo, required=True, **extra):
@@ -93,6 +109,34 @@ def _chremata_catalogs_schema():
                 _campo_schema("nombre", "string"),
                 _campo_schema("descripcion", "string", required=False),
             ],
+        },
+    }
+
+
+def _chremata_material_pool_schema():
+    return {
+        "endpoint": "/api/v1/chremata/material-pool/",
+        "contract": "chremata.material_pool.v1",
+        "schema_version": 1,
+        "fields": {
+            "contract": {"type": "string", "required": True},
+            "app": {"type": "string", "required": True},
+            "server_role": {"type": "string", "required": True},
+            "schema_version": {"type": "int", "required": True},
+            "generated_at": {"type": "datetime_utc_string", "required": True},
+            "pool_material_actual": {"type": "decimal_string", "required": True},
+            "total_gastos_material": {"type": "decimal_string", "required": True},
+            "total_material_recuperado": {"type": "decimal_string", "required": True},
+            "ultimo_gasto_material_fecha": {
+                "type": "datetime_utc_string",
+                "required": False,
+                "nullable": True,
+            },
+            "ultimo_ingreso_con_material_fecha": {
+                "type": "datetime_utc_string",
+                "required": False,
+                "nullable": True,
+            },
         },
     }
 
@@ -232,6 +276,67 @@ def _serializar_origen_ingreso(origen):
     }
 
 
+def _material_pool_snapshot():
+    total_gastos_material = GastoMaterial.objects.aggregate(
+        total=Sum("monto"),
+    )[
+        "total"
+    ] or Decimal("0.00")
+    total_material_recuperado = Ingreso.objects.aggregate(
+        total=Sum("material_recuperado"),
+    )["total"] or Decimal("0.00")
+    pool_material_actual = total_gastos_material - total_material_recuperado
+    if pool_material_actual < Decimal("0.00"):
+        pool_material_actual = Decimal("0.00")
+
+    ultimo_gasto_material_fecha = GastoMaterial.objects.aggregate(
+        fecha=Max("fecha"),
+    )["fecha"]
+    ultimo_ingreso_con_material_fecha = (
+        Ingreso.objects.filter(monto_material_cobrado__gt=0)
+        .aggregate(fecha=Max("fecha"))
+        .get("fecha")
+    )
+
+    return {
+        "pool_material_actual": pool_material_actual,
+        "total_gastos_material": total_gastos_material,
+        "total_material_recuperado": total_material_recuperado,
+        "ultimo_gasto_material_fecha": ultimo_gasto_material_fecha,
+        "ultimo_ingreso_con_material_fecha": ultimo_ingreso_con_material_fecha,
+    }
+
+
+@require_GET
+def material_pool(request):
+    snapshot = _material_pool_snapshot()
+
+    return JsonResponse(
+        {
+            "contract": "chremata.material_pool.v1",
+            "app": "chremata",
+            "server_role": "archeion",
+            "schema_version": 1,
+            "generated_at": _generated_at_iso(),
+            "pool_material_actual": _decimal_o_none(
+                snapshot["pool_material_actual"].quantize(PESOS_DECIMALES),
+            ),
+            "total_gastos_material": _decimal_o_none(
+                snapshot["total_gastos_material"].quantize(PESOS_DECIMALES),
+            ),
+            "total_material_recuperado": _decimal_o_none(
+                snapshot["total_material_recuperado"].quantize(PESOS_DECIMALES),
+            ),
+            "ultimo_gasto_material_fecha": _datetime_utc_iso(
+                snapshot["ultimo_gasto_material_fecha"],
+            ),
+            "ultimo_ingreso_con_material_fecha": _datetime_utc_iso(
+                snapshot["ultimo_ingreso_con_material_fecha"],
+            ),
+        },
+    )
+
+
 @require_GET
 def catalogos(request):
     generated_at_iso = _generated_at_iso()
@@ -323,6 +428,7 @@ def chremata_schema(request):
                 "uuids_are_strings": True,
                 "nullable_fields_use_null": True,
             },
+            "material_pool": _chremata_material_pool_schema(),
             "catalogs": _chremata_catalogs_schema(),
             "operations": _chremata_operations_schema(),
         },

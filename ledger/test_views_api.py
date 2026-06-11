@@ -12,6 +12,8 @@ from .models import (
     CanalCobro,
     ConceptoIngreso,
     EsquemaComision,
+    GastoMaterial,
+    Ingreso,
     MetodoPago,
     OrigenIngreso,
 )
@@ -285,6 +287,232 @@ class CatalogosApiTests(TestCase):
 
 
 @override_settings(DEBUG=False, CODEX_DEVICE_TOKEN="")
+class MaterialPoolApiTests(TestCase):
+    def setUp(self):
+        self.device_token, self.token_completo = DeviceToken.crear("Zephyros")
+        self.url = reverse("api-v1-chremata-material-pool")
+
+        self.metodo = MetodoPago.objects.create(nombre="Tarjeta")
+        self.canal = CanalCobro.objects.create(
+            nombre="Mercado Pago Tap",
+            metodo_pago=self.metodo,
+        )
+        self.esquema = EsquemaComision.objects.create(
+            nombre="Mercado Pago 3.5% + IVA",
+            porcentaje_base=Decimal("3.5000"),
+            cobra_iva=True,
+        )
+        self.esquema.canales_cobro.add(self.canal)
+        self.canal.esquema_comision_predeterminado = self.esquema
+        self.canal.save()
+        self.concepto = ConceptoIngreso.objects.create(
+            nombre="Consulta con material",
+            permite_material_adicional=True,
+        )
+        self.origen = OrigenIngreso.objects.create(nombre="Consultorio")
+
+    def get_material_pool(self):
+        return self.client.get(
+            self.url,
+            headers={"X-Codex-Device-Token": self.token_completo},
+        )
+
+    def crear_gasto(self, monto, fecha):
+        return GastoMaterial.objects.create(
+            fecha=fecha,
+            monto=monto,
+            descripcion="Material",
+        )
+
+    def crear_ingreso_con_material(
+        self,
+        monto_material_cobrado,
+        fecha,
+        monto_procedimiento=Decimal("100.00"),
+    ):
+        return Ingreso.objects.create(
+            fecha=fecha,
+            monto_procedimiento=monto_procedimiento,
+            monto_material_cobrado=monto_material_cobrado,
+            concepto=self.concepto,
+            canal_cobro=self.canal,
+            origen=self.origen,
+        )
+
+    def test_responde_200_con_token_valido(self):
+        response = self.get_material_pool()
+
+        self.assertEqual(response.status_code, 200)
+
+    def test_responde_401_sin_token_cuando_hay_device_token_activo(self):
+        response = self.client.get(self.url)
+
+        self.assertEqual(response.status_code, 401)
+
+    @patch("ledger.views_api.timezone")
+    def test_respuesta_incluye_metadata_y_campos_requeridos(self, timezone_mock):
+        timezone_mock.now.return_value = datetime(
+            2026,
+            6,
+            8,
+            4,
+            12,
+            0,
+            123456,
+            tzinfo=datetime_timezone.utc,
+        )
+
+        data = self.get_material_pool().json()
+
+        self.assertEqual(data["contract"], "chremata.material_pool.v1")
+        self.assertEqual(data["app"], "chremata")
+        self.assertEqual(data["server_role"], "archeion")
+        self.assertEqual(data["schema_version"], 1)
+        self.assertEqual(data["generated_at"], "2026-06-08T04:12:00Z")
+        self.assertIn("pool_material_actual", data)
+        self.assertIn("total_gastos_material", data)
+        self.assertIn("total_material_recuperado", data)
+        self.assertIn("ultimo_gasto_material_fecha", data)
+        self.assertIn("ultimo_ingreso_con_material_fecha", data)
+
+    def test_sin_gastos_ni_ingresos_devuelve_ceros_y_fechas_null(self):
+        data = self.get_material_pool().json()
+
+        self.assertEqual(data["total_gastos_material"], "0.00")
+        self.assertEqual(data["total_material_recuperado"], "0.00")
+        self.assertEqual(data["pool_material_actual"], "0.00")
+        self.assertIsNone(data["ultimo_gasto_material_fecha"])
+        self.assertIsNone(data["ultimo_ingreso_con_material_fecha"])
+
+    def test_total_gastos_material_refleja_suma_de_gastos(self):
+        self.crear_gasto(
+            Decimal("500.00"),
+            datetime(2026, 6, 7, 20, 10, tzinfo=datetime_timezone.utc),
+        )
+        self.crear_gasto(
+            Decimal("700.00"),
+            datetime(2026, 6, 8, 20, 10, tzinfo=datetime_timezone.utc),
+        )
+
+        data = self.get_material_pool().json()
+
+        self.assertEqual(data["total_gastos_material"], "1200.00")
+        self.assertEqual(data["pool_material_actual"], "1200.00")
+
+    def test_ingresos_con_material_actualizan_recuperado_y_pool(self):
+        self.crear_gasto(
+            Decimal("1200.00"),
+            datetime(2026, 6, 7, 20, 10, tzinfo=datetime_timezone.utc),
+        )
+        self.crear_ingreso_con_material(
+            Decimal("850.00"),
+            datetime(2026, 6, 7, 22, 40, tzinfo=datetime_timezone.utc),
+        )
+
+        data = self.get_material_pool().json()
+
+        self.assertEqual(data["total_material_recuperado"], "850.00")
+        self.assertEqual(data["pool_material_actual"], "350.00")
+
+    def test_pool_material_actual_nunca_baja_de_cero(self):
+        self.crear_gasto(
+            Decimal("10.00"),
+            datetime(2026, 6, 7, 20, 10, tzinfo=datetime_timezone.utc),
+        )
+        ingreso = self.crear_ingreso_con_material(
+            Decimal("10.00"),
+            datetime(2026, 6, 7, 22, 40, tzinfo=datetime_timezone.utc),
+        )
+        Ingreso.objects.filter(pk=ingreso.pk).update(
+            material_recuperado=Decimal("30.00"),
+        )
+
+        data = self.get_material_pool().json()
+
+        self.assertEqual(data["total_gastos_material"], "10.00")
+        self.assertEqual(data["total_material_recuperado"], "30.00")
+        self.assertEqual(data["pool_material_actual"], "0.00")
+
+    def test_montos_se_devuelven_como_strings_decimales_con_dos_decimales(self):
+        self.crear_gasto(
+            Decimal("1.50"),
+            datetime(2026, 6, 7, 20, 10, tzinfo=datetime_timezone.utc),
+        )
+
+        data = self.get_material_pool().json()
+
+        self.assertIsInstance(data["total_gastos_material"], str)
+        self.assertIsInstance(data["total_material_recuperado"], str)
+        self.assertIsInstance(data["pool_material_actual"], str)
+        self.assertEqual(data["total_gastos_material"], "1.50")
+        self.assertEqual(data["total_material_recuperado"], "0.00")
+        self.assertEqual(data["pool_material_actual"], "1.50")
+
+    @patch("ledger.views_api.timezone")
+    def test_generated_at_no_tiene_microsegundos_y_usa_z(self, timezone_mock):
+        timezone_mock.now.return_value = datetime(
+            2026,
+            6,
+            8,
+            4,
+            12,
+            0,
+            999999,
+            tzinfo=datetime_timezone.utc,
+        )
+
+        data = self.get_material_pool().json()
+
+        self.assertEqual(data["generated_at"], "2026-06-08T04:12:00Z")
+        self.assertNotIn(".", data["generated_at"])
+        self.assertTrue(data["generated_at"].endswith("Z"))
+
+    def test_ultimo_gasto_material_fecha_usa_gasto_mas_reciente(self):
+        self.crear_gasto(
+            Decimal("100.00"),
+            datetime(2026, 6, 6, 20, 10, 1, 123456, tzinfo=datetime_timezone.utc),
+        )
+        self.crear_gasto(
+            Decimal("200.00"),
+            datetime(2026, 6, 7, 20, 10, 2, 654321, tzinfo=datetime_timezone.utc),
+        )
+
+        data = self.get_material_pool().json()
+
+        self.assertEqual(
+            data["ultimo_gasto_material_fecha"],
+            "2026-06-07T20:10:02Z",
+        )
+
+    def test_ultimo_ingreso_con_material_fecha_usa_ingreso_con_material_mas_reciente(
+        self,
+    ):
+        self.crear_gasto(
+            Decimal("500.00"),
+            datetime(2026, 6, 6, 20, 10, tzinfo=datetime_timezone.utc),
+        )
+        self.crear_ingreso_con_material(
+            Decimal("50.00"),
+            datetime(2026, 6, 7, 22, 40, 1, 123456, tzinfo=datetime_timezone.utc),
+        )
+        self.crear_ingreso_con_material(
+            Decimal("0.00"),
+            datetime(2026, 6, 8, 22, 40, 2, tzinfo=datetime_timezone.utc),
+        )
+        self.crear_ingreso_con_material(
+            Decimal("25.00"),
+            datetime(2026, 6, 9, 22, 40, 3, 654321, tzinfo=datetime_timezone.utc),
+        )
+
+        data = self.get_material_pool().json()
+
+        self.assertEqual(
+            data["ultimo_ingreso_con_material_fecha"],
+            "2026-06-09T22:40:03Z",
+        )
+
+
+@override_settings(DEBUG=False, CODEX_DEVICE_TOKEN="")
 class ChremataSchemaApiTests(TestCase):
     def setUp(self):
         self.device_token, self.token_completo = DeviceToken.crear("Zephyros")
@@ -362,6 +590,60 @@ class ChremataSchemaApiTests(TestCase):
         self.assertTrue(snapshot["decimals_are_strings"])
         self.assertTrue(snapshot["uuids_are_strings"])
         self.assertTrue(snapshot["nullable_fields_use_null"])
+
+    def test_declara_material_pool(self):
+        material_pool = self.get_schema().json()["material_pool"]
+
+        self.assertEqual(material_pool["endpoint"], "/api/v1/chremata/material-pool/")
+        self.assertEqual(material_pool["contract"], "chremata.material_pool.v1")
+        self.assertEqual(material_pool["schema_version"], 1)
+        self.assertEqual(
+            set(material_pool["fields"]),
+            {
+                "contract",
+                "app",
+                "server_role",
+                "schema_version",
+                "generated_at",
+                "pool_material_actual",
+                "total_gastos_material",
+                "total_material_recuperado",
+                "ultimo_gasto_material_fecha",
+                "ultimo_ingreso_con_material_fecha",
+            },
+        )
+        self.assertEqual(
+            material_pool["fields"]["generated_at"],
+            {"type": "datetime_utc_string", "required": True},
+        )
+        self.assertEqual(
+            material_pool["fields"]["pool_material_actual"],
+            {"type": "decimal_string", "required": True},
+        )
+        self.assertEqual(
+            material_pool["fields"]["total_gastos_material"],
+            {"type": "decimal_string", "required": True},
+        )
+        self.assertEqual(
+            material_pool["fields"]["total_material_recuperado"],
+            {"type": "decimal_string", "required": True},
+        )
+        self.assertEqual(
+            material_pool["fields"]["ultimo_gasto_material_fecha"],
+            {
+                "type": "datetime_utc_string",
+                "required": False,
+                "nullable": True,
+            },
+        )
+        self.assertEqual(
+            material_pool["fields"]["ultimo_ingreso_con_material_fecha"],
+            {
+                "type": "datetime_utc_string",
+                "required": False,
+                "nullable": True,
+            },
+        )
 
     def test_declara_los_cinco_catalogos(self):
         catalogs = self.get_schema().json()["catalogs"]
