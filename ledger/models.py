@@ -5,7 +5,6 @@ from django.core.exceptions import ValidationError
 from django.db import models
 from django.db.models import Sum
 
-
 PESOS_DECIMALES = Decimal("0.01")
 PORCENTAJE_DECIMALES = Decimal("0.0000")
 CAMPOS_RECALCULO_COMISION = {
@@ -107,11 +106,9 @@ class CanalCobro(models.Model):
         if not self.pk or not self.esquema_comision_predeterminado_id:
             return
 
-        esquema_asociado = (
-            self.esquema_comision_predeterminado.canales_cobro.filter(
-                pk=self.pk,
-            ).exists()
-        )
+        esquema_asociado = self.esquema_comision_predeterminado.canales_cobro.filter(
+            pk=self.pk,
+        ).exists()
         if not esquema_asociado:
             raise ValidationError(
                 {
@@ -191,6 +188,172 @@ class GastoMaterial(models.Model):
 
     def __str__(self):
         return f"{self.fecha.date()} - ${self.monto}"
+
+
+class Ticket(models.Model):
+    ESTADO_PENDIENTE = "pendiente"
+    ESTADO_COBRADO = "cobrado"
+    ESTADO_CANCELADO = "cancelado"
+    ESTADO_ABANDONADO = "abandonado"
+
+    ESTADOS = (
+        (ESTADO_PENDIENTE, "pendiente"),
+        (ESTADO_COBRADO, "cobrado"),
+        (ESTADO_CANCELADO, "cancelado"),
+        (ESTADO_ABANDONADO, "abandonado"),
+    )
+
+    public_id = models.UUIDField(default=uuid.uuid4, unique=True, editable=False)
+    fecha = models.DateTimeField()
+    estado = models.CharField(
+        max_length=20,
+        choices=ESTADOS,
+        default=ESTADO_PENDIENTE,
+    )
+    nombre_referencia = models.CharField(max_length=150, blank=True)
+    origen = models.ForeignKey(
+        OrigenIngreso,
+        on_delete=models.PROTECT,
+        related_name="tickets",
+    )
+    notas = models.TextField(blank=True)
+    monto_total = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        default=Decimal("0.00"),
+    )
+    monto_material_cobrado = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        default=Decimal("0.00"),
+    )
+    creado_en = models.DateTimeField(auto_now_add=True)
+    actualizado_en = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-fecha", "-id"]
+        verbose_name = "ticket"
+        verbose_name_plural = "tickets"
+
+    def __str__(self):
+        referencia = f" - {self.nombre_referencia}" if self.nombre_referencia else ""
+        return f"{self.fecha.date()}{referencia} - {self.estado} - ${self.monto_total}"
+
+    def recalcular_totales(self, guardar=True):
+        if not self.pk:
+            self.monto_total = Decimal("0.00")
+            self.monto_material_cobrado = Decimal("0.00")
+            return
+
+        totales = self.lineas.aggregate(
+            monto_total=Sum("monto_total"),
+            monto_material_cobrado=Sum("monto_material_cobrado"),
+        )
+        self.monto_total = (totales["monto_total"] or Decimal("0.00")).quantize(
+            PESOS_DECIMALES
+        )
+        self.monto_material_cobrado = (
+            totales["monto_material_cobrado"] or Decimal("0.00")
+        ).quantize(PESOS_DECIMALES)
+
+        if guardar:
+            self.save(update_fields=["monto_total", "monto_material_cobrado"])
+
+
+class TicketLinea(models.Model):
+    ticket = models.ForeignKey(
+        Ticket,
+        on_delete=models.CASCADE,
+        related_name="lineas",
+    )
+    concepto = models.ForeignKey(
+        ConceptoIngreso,
+        on_delete=models.PROTECT,
+        related_name="ticket_lineas",
+    )
+    descripcion = models.CharField(max_length=200, blank=True)
+    cantidad = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        default=Decimal("1.00"),
+    )
+    monto_unitario = models.DecimalField(max_digits=10, decimal_places=2)
+    monto_total = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        default=Decimal("0.00"),
+    )
+    monto_material_cobrado = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        default=Decimal("0.00"),
+    )
+    orden = models.PositiveIntegerField(default=0)
+    notas = models.TextField(blank=True)
+    creado_en = models.DateTimeField(auto_now_add=True)
+    actualizado_en = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["ticket", "orden", "id"]
+        verbose_name = "línea de ticket"
+        verbose_name_plural = "líneas de ticket"
+
+    def __str__(self):
+        return f"{self.ticket_id} - {self.concepto} - ${self.monto_total}"
+
+    def validar_material(self):
+        monto_material_cobrado = (
+            self.monto_material_cobrado or Decimal("0.00")
+        ).quantize(PESOS_DECIMALES)
+
+        if (
+            monto_material_cobrado > Decimal("0.00")
+            and not self.concepto.permite_material_adicional
+        ):
+            raise ValidationError(
+                {
+                    "monto_material_cobrado": (
+                        "Este concepto no permite cobrar material adicional."
+                    ),
+                },
+            )
+
+    def calcular_total(self):
+        cantidad = (self.cantidad or Decimal("0.00")).quantize(
+            PESOS_DECIMALES,
+            rounding=ROUND_HALF_UP,
+        )
+        monto_unitario = (self.monto_unitario or Decimal("0.00")).quantize(
+            PESOS_DECIMALES,
+            rounding=ROUND_HALF_UP,
+        )
+        monto_material_cobrado = (
+            self.monto_material_cobrado or Decimal("0.00")
+        ).quantize(PESOS_DECIMALES, rounding=ROUND_HALF_UP)
+
+        self.cantidad = cantidad
+        self.monto_unitario = monto_unitario
+        self.monto_material_cobrado = monto_material_cobrado
+        self.monto_total = (cantidad * monto_unitario).quantize(
+            PESOS_DECIMALES,
+            rounding=ROUND_HALF_UP,
+        )
+
+    def clean(self):
+        super().clean()
+        self.validar_material()
+
+    def save(self, *args, **kwargs):
+        self.validar_material()
+        self.calcular_total()
+        super().save(*args, **kwargs)
+        self.ticket.recalcular_totales()
+
+    def delete(self, *args, **kwargs):
+        ticket = self.ticket
+        resultado = super().delete(*args, **kwargs)
+        ticket.recalcular_totales()
+        return resultado
 
 
 class Ingreso(models.Model):
@@ -303,7 +466,9 @@ class Ingreso(models.Model):
     def calcular_pool_material_actual(cls, excluir_ingreso_id=None):
         total_gastos = GastoMaterial.objects.aggregate(
             total=Sum("monto"),
-        )["total"] or Decimal("0.00")
+        )[
+            "total"
+        ] or Decimal("0.00")
 
         ingresos = cls.objects.all()
         if excluir_ingreso_id:
@@ -311,7 +476,9 @@ class Ingreso(models.Model):
 
         total_recuperado = ingresos.aggregate(
             total=Sum("material_recuperado"),
-        )["total"] or Decimal("0.00")
+        )[
+            "total"
+        ] or Decimal("0.00")
 
         pool = total_gastos - total_recuperado
         if pool < Decimal("0.00"):
@@ -395,9 +562,9 @@ class Ingreso(models.Model):
         self.validar_material()
 
     def calcular_comision(self):
-        monto_procedimiento = (
-            self.monto_procedimiento or Decimal("0.00")
-        ).quantize(PESOS_DECIMALES, rounding=ROUND_HALF_UP)
+        monto_procedimiento = (self.monto_procedimiento or Decimal("0.00")).quantize(
+            PESOS_DECIMALES, rounding=ROUND_HALF_UP
+        )
         monto_material_cobrado = (
             self.monto_material_cobrado or Decimal("0.00")
         ).quantize(PESOS_DECIMALES, rounding=ROUND_HALF_UP)
@@ -445,9 +612,13 @@ class Ingreso(models.Model):
                 return False
 
         try:
-            ingreso_previo = Ingreso.objects.filter(pk=self.pk).values(
-                *CAMPOS_RECALCULO_COMISION,
-            ).get()
+            ingreso_previo = (
+                Ingreso.objects.filter(pk=self.pk)
+                .values(
+                    *CAMPOS_RECALCULO_COMISION,
+                )
+                .get()
+            )
         except Ingreso.DoesNotExist:
             return True
 
@@ -466,9 +637,13 @@ class Ingreso(models.Model):
                 return False
 
         try:
-            ingreso_previo = Ingreso.objects.filter(pk=self.pk).values(
-                *CAMPOS_RECALCULO_MATERIAL,
-            ).get()
+            ingreso_previo = (
+                Ingreso.objects.filter(pk=self.pk)
+                .values(
+                    *CAMPOS_RECALCULO_MATERIAL,
+                )
+                .get()
+            )
         except Ingreso.DoesNotExist:
             return True
 
