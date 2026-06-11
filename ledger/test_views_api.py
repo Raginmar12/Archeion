@@ -533,6 +533,18 @@ class ChremataSchemaApiTests(TestCase):
             for field in data["operations"][operation_name]["payload_fields"]
         }
 
+    def ticket_entity_field_names(self, data, entity_name):
+        return {
+            field["name"]
+            for field in data["tickets"]["entities"][entity_name]["fields"]
+        }
+
+    def operation_payload_fields_by_name(self, data, operation_name):
+        return {
+            field["name"]: field
+            for field in data["operations"][operation_name]["payload_fields"]
+        }
+
     def test_responde_200_con_token_valido(self):
         response = self.get_schema()
 
@@ -571,6 +583,10 @@ class ChremataSchemaApiTests(TestCase):
                 "operations": [
                     "chremata.operation.crear_ingreso.v1",
                     "chremata.operation.crear_gasto_material.v1",
+                    "chremata.operation.crear_ticket.v1",
+                    "chremata.operation.cobrar_ticket.v1",
+                    "chremata.operation.cancelar_ticket.v1",
+                    "chremata.operation.abandonar_ticket.v1",
                 ],
                 "clients": ["zephyros"],
             },
@@ -644,6 +660,205 @@ class ChremataSchemaApiTests(TestCase):
                 "nullable": True,
             },
         )
+
+    def test_declara_contratos_de_tickets(self):
+        tickets = self.get_schema().json()["tickets"]
+
+        self.assertEqual(
+            set(tickets["entities"]),
+            {"ticket", "ticket_linea", "ticket_pago"},
+        )
+        self.assertEqual(
+            tickets["entities"]["ticket"]["contract"],
+            "chremata.ticket.v1",
+        )
+        self.assertEqual(
+            tickets["entities"]["ticket_linea"]["contract"],
+            "chremata.ticket_line.v1",
+        )
+        self.assertEqual(
+            tickets["entities"]["ticket_pago"]["contract"],
+            "chremata.ticket_payment.v1",
+        )
+        self.assertEqual(
+            tickets["entities"]["ticket"]["allowed_states"],
+            ["pendiente", "cobrado", "cancelado", "abandonado"],
+        )
+
+    def test_declara_campos_de_ticket_y_linea(self):
+        data = self.get_schema().json()
+
+        self.assertEqual(
+            self.ticket_entity_field_names(data, "ticket"),
+            {
+                "ticket_public_id",
+                "fecha",
+                "estado",
+                "nombre_referencia",
+                "origen_ingreso_public_id",
+                "monto_total",
+                "monto_material_cobrado",
+                "monto_total_cobrado",
+                "notas",
+                "lineas",
+            },
+        )
+        self.assertEqual(
+            self.ticket_entity_field_names(data, "ticket_linea"),
+            {
+                "concepto_ingreso_public_id",
+                "descripcion",
+                "cantidad",
+                "monto_unitario",
+                "monto_total",
+                "monto_material_cobrado",
+                "orden",
+                "notas",
+            },
+        )
+        ticket_fields = {
+            field["name"]: field
+            for field in data["tickets"]["entities"]["ticket"]["fields"]
+        }
+        linea_fields = {
+            field["name"]: field
+            for field in data["tickets"]["entities"]["ticket_linea"]["fields"]
+        }
+        self.assertEqual(ticket_fields["fecha"]["type"], "datetime_utc_string")
+        self.assertEqual(ticket_fields["lineas"]["type"], "array")
+        self.assertEqual(
+            ticket_fields["lineas"]["items_contract"],
+            "chremata.ticket_line.v1",
+        )
+        self.assertEqual(linea_fields["cantidad"]["type"], "decimal_string")
+        self.assertEqual(linea_fields["monto_unitario"]["type"], "money_string")
+        self.assertEqual(linea_fields["monto_total"]["type"], "money_string")
+        self.assertEqual(
+            linea_fields["monto_material_cobrado"]["type"],
+            "money_string",
+        )
+
+    def test_declara_campos_de_ticket_pago(self):
+        data = self.get_schema().json()
+        fields = {
+            field["name"]: field
+            for field in data["tickets"]["entities"]["ticket_pago"]["fields"]
+        }
+
+        self.assertEqual(
+            set(fields),
+            {
+                "ticket_public_id",
+                "fecha_cobro",
+                "canal_cobro_public_id",
+                "esquema_comision_public_id",
+                "concepto_ingreso_resumen_public_id",
+                "notas",
+            },
+        )
+        self.assertEqual(fields["fecha_cobro"]["type"], "datetime_utc_string")
+        self.assertEqual(fields["canal_cobro_public_id"]["type"], "uuid")
+        self.assertEqual(fields["esquema_comision_public_id"]["type"], "uuid")
+        self.assertFalse(fields["esquema_comision_public_id"]["required"])
+        self.assertTrue(fields["esquema_comision_public_id"]["nullable"])
+
+    def test_declara_reglas_de_tickets(self):
+        rules = self.get_schema().json()["tickets"]["rules"]
+
+        self.assertFalse(rules["ticket_pendiente_genera_ingreso"])
+        self.assertFalse(rules["ticket_cancelado_genera_ingreso"])
+        self.assertFalse(rules["ticket_abandonado_genera_ingreso"])
+        self.assertTrue(rules["solo_cobrar_ticket_genera_ticket_pago_e_ingreso"])
+        self.assertTrue(rules["material_pool_se_afecta_solo_con_ingreso_oficial"])
+        self.assertTrue(rules["metricas_por_concepto_salen_de_ticket_linea"])
+        self.assertTrue(rules["dinero_oficial_sale_de_ingreso"])
+        self.assertTrue(rules["nombre_referencia_es_referencia_operativa"])
+        self.assertEqual(
+            rules["prohibe_datos_clinicos"],
+            ["diagnosticos", "recetas", "tratamientos", "expedientes"],
+        )
+
+    def test_declara_operaciones_futuras_de_tickets(self):
+        operations = self.get_schema().json()["operations"]
+
+        self.assertEqual(
+            operations["crear_ticket"]["contract"],
+            "chremata.operation.crear_ticket.v1",
+        )
+        self.assertEqual(
+            operations["cobrar_ticket"]["contract"],
+            "chremata.operation.cobrar_ticket.v1",
+        )
+        self.assertEqual(
+            operations["cancelar_ticket"]["contract"],
+            "chremata.operation.cancelar_ticket.v1",
+        )
+        self.assertEqual(
+            operations["abandonar_ticket"]["contract"],
+            "chremata.operation.abandonar_ticket.v1",
+        )
+        for name in (
+            "crear_ticket",
+            "cobrar_ticket",
+            "cancelar_ticket",
+            "abandonar_ticket",
+        ):
+            self.assertEqual(operations[name]["method"], "POST")
+            self.assertEqual(
+                operations[name]["future_endpoint"],
+                "/api/v1/chremata/operations/",
+            )
+            self.assertEqual(
+                operations[name]["idempotency_key"],
+                ["device_id", "device_entry_id"],
+            )
+
+    def test_crear_ticket_incluye_lineas_como_array(self):
+        data = self.get_schema().json()
+        crear_ticket = self.operation_payload_fields_by_name(data, "crear_ticket")
+        ticket_fields = {
+            field["name"]: field
+            for field in data["operations"]["crear_ticket"]["ticket_fields"]
+        }
+
+        self.assertEqual(crear_ticket["ticket"]["type"], "object")
+        self.assertEqual(crear_ticket["ticket"]["contract"], "chremata.ticket.v1")
+        self.assertEqual(ticket_fields["lineas"]["type"], "array")
+        self.assertEqual(
+            ticket_fields["lineas"]["items_contract"],
+            "chremata.ticket_line.v1",
+        )
+
+    def test_cobrar_ticket_declara_referencias_de_cobro(self):
+        data = self.get_schema().json()
+        fields = self.operation_payload_fields_by_name(data, "cobrar_ticket")
+
+        self.assertIn("canal_cobro_public_id", fields)
+        self.assertIn("esquema_comision_public_id", fields)
+        self.assertIn("concepto_ingreso_resumen_public_id", fields)
+        self.assertEqual(
+            fields["canal_cobro_public_id"]["relation"],
+            "canales_cobro.public_id",
+        )
+        self.assertEqual(
+            fields["esquema_comision_public_id"]["relation"],
+            "esquemas_comision.public_id",
+        )
+        self.assertFalse(fields["esquema_comision_public_id"]["required"])
+        self.assertTrue(fields["esquema_comision_public_id"]["nullable"])
+        self.assertEqual(
+            fields["concepto_ingreso_resumen_public_id"]["relation"],
+            "conceptos_ingreso.public_id",
+        )
+        self.assertEqual(fields["fecha_cobro"]["type"], "datetime_utc_string")
+        self.assertTrue(
+            data["operations"]["cobrar_ticket"]["server_authority"][
+                "creates_ingreso_oficial"
+            ]
+        )
+
+    def test_schema_sigue_declarando_material_pool(self):
+        self.assertIn("material_pool", self.get_schema().json())
 
     def test_declara_los_cinco_catalogos(self):
         catalogs = self.get_schema().json()["catalogs"]
@@ -723,6 +938,10 @@ class ChremataSchemaApiTests(TestCase):
             field["name"]: field["type"]
             for field in data["operations"]["crear_gasto_material"]["payload_fields"]
         }
+        ticket_linea = {
+            field["name"]: field["type"]
+            for field in data["tickets"]["entities"]["ticket_linea"]["fields"]
+        }
 
         self.assertEqual(esquemas["porcentaje_base"], "decimal_string")
         self.assertEqual(esquemas["porcentaje_iva"], "decimal_string")
@@ -731,11 +950,25 @@ class ChremataSchemaApiTests(TestCase):
         self.assertEqual(crear_ingreso["monto_procedimiento"], "money_string")
         self.assertEqual(crear_ingreso["monto_material_cobrado"], "money_string")
         self.assertEqual(crear_gasto["monto"], "money_string")
+        self.assertEqual(ticket_linea["cantidad"], "decimal_string")
+        self.assertEqual(ticket_linea["monto_unitario"], "money_string")
+        self.assertEqual(ticket_linea["monto_total"], "money_string")
+        self.assertEqual(ticket_linea["monto_material_cobrado"], "money_string")
 
     def test_declara_operaciones_futuras(self):
         operations = self.get_schema().json()["operations"]
 
-        self.assertEqual(set(operations), {"crear_ingreso", "crear_gasto_material"})
+        self.assertEqual(
+            set(operations),
+            {
+                "crear_ingreso",
+                "crear_gasto_material",
+                "crear_ticket",
+                "cobrar_ticket",
+                "cancelar_ticket",
+                "abandonar_ticket",
+            },
+        )
         self.assertEqual(
             operations["crear_ingreso"]["contract"],
             "chremata.operation.crear_ingreso.v1",
