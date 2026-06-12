@@ -18,7 +18,12 @@ Including another URLconf
 from django.contrib import admin
 from django.urls import path
 
-from ledger.views_api import catalogos, chremata_schema
+from ledger.views_api import (
+    catalogos,
+    chremata_operations,
+    chremata_schema,
+    material_pool,
+)
 
 from .views import device_ping
 
@@ -30,5 +35,15 @@ urlpatterns = [
         "api/v1/chremata/schema/",
         chremata_schema,
         name="api-v1-chremata-schema",
+    ),
+    path(
+        "api/v1/chremata/material-pool/",
+        material_pool,
+        name="api-v1-chremata-material-pool",
+    ),
+    path(
+        "api/v1/chremata/operations/",
+        chremata_operations,
+        name="api-v1-chremata-operations",
     ),
 ]

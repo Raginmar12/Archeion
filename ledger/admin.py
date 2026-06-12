@@ -8,6 +8,9 @@ from .models import (
     Ingreso,
     MetodoPago,
     OrigenIngreso,
+    Ticket,
+    TicketLinea,
+    TicketPago,
 )
 
 
@@ -121,3 +124,80 @@ class IngresoAdmin(admin.ModelAdmin):
     @admin.display(description="método de pago", ordering="canal_cobro__metodo_pago")
     def metodo_pago_derivado(self, obj):
         return obj.metodo_pago
+
+
+class TicketLineaInline(admin.TabularInline):
+    model = TicketLinea
+    extra = 1
+    readonly_fields = ("monto_total",)
+    fields = (
+        "orden",
+        "concepto",
+        "descripcion",
+        "cantidad",
+        "monto_unitario",
+        "monto_total",
+        "monto_material_cobrado",
+        "notas",
+    )
+
+
+@admin.register(Ticket)
+class TicketAdmin(admin.ModelAdmin):
+    readonly_fields = ("public_id", "monto_total", "monto_material_cobrado")
+    inlines = (TicketLineaInline,)
+    list_display = (
+        "fecha",
+        "estado",
+        "nombre_referencia",
+        "origen",
+        "monto_total",
+        "monto_material_cobrado",
+        "creado_en",
+    )
+    search_fields = ("nombre_referencia", "notas", "origen__nombre")
+    list_filter = ("estado", "origen", "fecha")
+    date_hierarchy = "fecha"
+
+
+@admin.register(TicketLinea)
+class TicketLineaAdmin(admin.ModelAdmin):
+    readonly_fields = ("monto_total",)
+    list_display = (
+        "ticket",
+        "orden",
+        "concepto",
+        "cantidad",
+        "monto_unitario",
+        "monto_total",
+        "monto_material_cobrado",
+    )
+    search_fields = (
+        "ticket__nombre_referencia",
+        "concepto__nombre",
+        "descripcion",
+        "notas",
+    )
+    list_filter = ("concepto", "ticket__estado")
+
+
+@admin.register(TicketPago)
+class TicketPagoAdmin(admin.ModelAdmin):
+    readonly_fields = ("ingreso",)
+    list_display = (
+        "ticket",
+        "ingreso",
+        "fecha",
+        "canal_cobro",
+        "esquema_comision",
+        "concepto_ingreso",
+        "creado_en",
+    )
+    search_fields = (
+        "ticket__id",
+        "ticket__public_id",
+        "ticket__nombre_referencia",
+        "ingreso__id",
+    )
+    list_filter = ("canal_cobro", "esquema_comision", "concepto_ingreso", "fecha")
+    date_hierarchy = "fecha"

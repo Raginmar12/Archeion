@@ -3,9 +3,12 @@ from uuid import UUID
 
 from django.contrib import admin
 from django.core.exceptions import ValidationError
+from django.db import models
 from django.forms import modelform_factory
 from django.test import TestCase
 from django.utils import timezone
+
+from .services import cobrar_ticket
 
 from .models import (
     CanalCobro,
@@ -15,6 +18,9 @@ from .models import (
     Ingreso,
     MetodoPago,
     OrigenIngreso,
+    Ticket,
+    TicketLinea,
+    TicketPago,
 )
 
 
@@ -337,7 +343,6 @@ class LedgerComisionesTests(TestCase):
         self.assertEqual(ingreso.monto_neto, Decimal("1008.00"))
         self.assertEqual(ingreso.porcentaje_comision_aplicado, Decimal("4.0000"))
 
-
     def test_gasto_material_aumenta_pool(self):
         GastoMaterial.objects.create(
             fecha=timezone.now(),
@@ -456,7 +461,9 @@ class LedgerComisionesTests(TestCase):
 
         self.assertEqual(ingreso.monto_material_cobrado, Decimal("50.00"))
 
-    def test_no_permite_material_cobrado_si_concepto_no_permite_material_adicional(self):
+    def test_no_permite_material_cobrado_si_concepto_no_permite_material_adicional(
+        self,
+    ):
         with self.assertRaises(ValidationError) as contexto:
             self.crear_ingreso(
                 concepto=self.concepto,
@@ -477,3 +484,508 @@ class LedgerComisionesTests(TestCase):
         self.assertEqual(ingreso.monto_material_cobrado, Decimal("0.00"))
         self.assertEqual(ingreso.material_recuperado, Decimal("0.00"))
         self.assertEqual(ingreso.material_excedente, Decimal("0.00"))
+
+
+class TicketTests(TestCase):
+    def setUp(self):
+        self.origen = OrigenIngreso.objects.create(nombre="Consultorio")
+        self.concepto = ConceptoIngreso.objects.create(nombre="Consulta")
+        self.concepto_material = ConceptoIngreso.objects.create(
+            nombre="Curación con material",
+            permite_material_adicional=True,
+            monto_material_sugerido=Decimal("50.00"),
+        )
+
+    def crear_ticket(self, **kwargs):
+        datos = {
+            "fecha": timezone.now(),
+            "estado": Ticket.ESTADO_PENDIENTE,
+            "nombre_referencia": "Referencia operativa",
+            "origen": self.origen,
+        }
+        datos.update(kwargs)
+        return Ticket.objects.create(**datos)
+
+    def test_ticket_genera_public_id_uuid_unico_y_no_editable(self):
+        primero = self.crear_ticket(nombre_referencia="Primero")
+        segundo = self.crear_ticket(nombre_referencia="Segundo")
+
+        self.assertIsInstance(primero.public_id, UUID)
+        self.assertNotEqual(primero.public_id, segundo.public_id)
+
+        campo = Ticket._meta.get_field("public_id")
+        self.assertTrue(campo.unique)
+        self.assertFalse(campo.editable)
+        self.assertNotIn(
+            "public_id",
+            modelform_factory(Ticket, fields="__all__").base_fields,
+        )
+        self.assertIn("public_id", admin.site._registry[Ticket].readonly_fields)
+
+    def test_ticket_pendiente_puede_existir_sin_canal_ni_esquema_comision(self):
+        ticket = self.crear_ticket()
+
+        self.assertEqual(ticket.estado, Ticket.ESTADO_PENDIENTE)
+        self.assertEqual(ticket.monto_total, Decimal("0.00"))
+        self.assertEqual(ticket.monto_material_cobrado, Decimal("0.00"))
+
+    def test_ticket_linea_calcula_monto_total(self):
+        ticket = self.crear_ticket()
+
+        linea = TicketLinea.objects.create(
+            ticket=ticket,
+            concepto=self.concepto,
+            cantidad=Decimal("2.00"),
+            monto_unitario=Decimal("150.00"),
+        )
+
+        self.assertEqual(linea.monto_total, Decimal("300.00"))
+
+    def test_ticket_con_varias_lineas_calcula_monto_total(self):
+        ticket = self.crear_ticket()
+        TicketLinea.objects.create(
+            ticket=ticket,
+            concepto=self.concepto,
+            cantidad=Decimal("1.00"),
+            monto_unitario=Decimal("300.00"),
+        )
+        TicketLinea.objects.create(
+            ticket=ticket,
+            concepto=self.concepto_material,
+            cantidad=Decimal("2.00"),
+            monto_unitario=Decimal("75.00"),
+        )
+
+        ticket.refresh_from_db()
+
+        self.assertEqual(ticket.monto_total, Decimal("450.00"))
+
+    def test_ticket_con_lineas_calcula_monto_material_cobrado(self):
+        ticket = self.crear_ticket()
+        TicketLinea.objects.create(
+            ticket=ticket,
+            concepto=self.concepto_material,
+            cantidad=Decimal("1.00"),
+            monto_unitario=Decimal("300.00"),
+            monto_material_cobrado=Decimal("50.00"),
+        )
+        TicketLinea.objects.create(
+            ticket=ticket,
+            concepto=self.concepto_material,
+            cantidad=Decimal("1.00"),
+            monto_unitario=Decimal("200.00"),
+            monto_material_cobrado=Decimal("25.00"),
+        )
+
+        ticket.refresh_from_db()
+
+        self.assertEqual(ticket.monto_material_cobrado, Decimal("75.00"))
+
+    def test_ticket_abandonado_conserva_lineas_y_total(self):
+        ticket = self.crear_ticket(estado=Ticket.ESTADO_ABANDONADO)
+        TicketLinea.objects.create(
+            ticket=ticket,
+            concepto=self.concepto,
+            cantidad=Decimal("1.00"),
+            monto_unitario=Decimal("300.00"),
+        )
+
+        ticket.refresh_from_db()
+
+        self.assertEqual(ticket.estado, Ticket.ESTADO_ABANDONADO)
+        self.assertEqual(ticket.lineas.count(), 1)
+        self.assertEqual(ticket.monto_total, Decimal("300.00"))
+
+    def test_ticket_cobrado_no_crea_ingreso_automaticamente(self):
+        ticket = self.crear_ticket(estado=Ticket.ESTADO_COBRADO)
+        TicketLinea.objects.create(
+            ticket=ticket,
+            concepto=self.concepto,
+            cantidad=Decimal("1.00"),
+            monto_unitario=Decimal("300.00"),
+        )
+
+        self.assertEqual(Ingreso.objects.count(), 0)
+
+    def test_ticket_linea_permite_material_si_concepto_permite_material_adicional(self):
+        ticket = self.crear_ticket()
+
+        linea = TicketLinea.objects.create(
+            ticket=ticket,
+            concepto=self.concepto_material,
+            cantidad=Decimal("1.00"),
+            monto_unitario=Decimal("300.00"),
+            monto_material_cobrado=Decimal("50.00"),
+        )
+
+        self.assertEqual(linea.monto_material_cobrado, Decimal("50.00"))
+
+    def test_ticket_linea_rechaza_material_si_concepto_no_permite_material_adicional(
+        self,
+    ):
+        ticket = self.crear_ticket()
+
+        with self.assertRaises(ValidationError) as contexto:
+            TicketLinea.objects.create(
+                ticket=ticket,
+                concepto=self.concepto,
+                cantidad=Decimal("1.00"),
+                monto_unitario=Decimal("300.00"),
+                monto_material_cobrado=Decimal("50.00"),
+            )
+
+        self.assertEqual(
+            contexto.exception.message_dict["monto_material_cobrado"],
+            ["Este concepto no permite cobrar material adicional."],
+        )
+
+    def test_editar_linea_actualiza_totales_del_ticket(self):
+        ticket = self.crear_ticket()
+        linea = TicketLinea.objects.create(
+            ticket=ticket,
+            concepto=self.concepto_material,
+            cantidad=Decimal("1.00"),
+            monto_unitario=Decimal("300.00"),
+            monto_material_cobrado=Decimal("50.00"),
+        )
+
+        linea.cantidad = Decimal("2.00")
+        linea.monto_unitario = Decimal("200.00")
+        linea.monto_material_cobrado = Decimal("75.00")
+        linea.save()
+        ticket.refresh_from_db()
+
+        self.assertEqual(ticket.monto_total, Decimal("400.00"))
+        self.assertEqual(ticket.monto_material_cobrado, Decimal("75.00"))
+
+    def test_eliminar_linea_actualiza_totales_del_ticket(self):
+        ticket = self.crear_ticket()
+        linea = TicketLinea.objects.create(
+            ticket=ticket,
+            concepto=self.concepto,
+            cantidad=Decimal("1.00"),
+            monto_unitario=Decimal("300.00"),
+        )
+        TicketLinea.objects.create(
+            ticket=ticket,
+            concepto=self.concepto_material,
+            cantidad=Decimal("1.00"),
+            monto_unitario=Decimal("200.00"),
+            monto_material_cobrado=Decimal("50.00"),
+        )
+
+        linea.delete()
+        ticket.refresh_from_db()
+
+        self.assertEqual(ticket.monto_total, Decimal("200.00"))
+        self.assertEqual(ticket.monto_material_cobrado, Decimal("50.00"))
+
+
+class TicketPagoTests(TestCase):
+    def setUp(self):
+        self.metodo_tarjeta = MetodoPago.objects.create(nombre="Tarjeta")
+        self.metodo_efectivo = MetodoPago.objects.create(nombre="Efectivo")
+        self.canal_tap = CanalCobro.objects.create(
+            nombre="Mercado Pago Tap",
+            metodo_pago=self.metodo_tarjeta,
+        )
+        self.canal_caja = CanalCobro.objects.create(
+            nombre="Efectivo en caja",
+            metodo_pago=self.metodo_efectivo,
+        )
+        self.esquema_mercado_pago = EsquemaComision.objects.create(
+            nombre="Mercado Pago 3.5% + IVA",
+            porcentaje_base=Decimal("3.5000"),
+            cobra_iva=True,
+        )
+        self.esquema_mercado_pago.canales_cobro.add(self.canal_tap)
+        self.canal_tap.esquema_comision_predeterminado = self.esquema_mercado_pago
+        self.canal_tap.save()
+
+        self.esquema_sin_comision = EsquemaComision.objects.create(
+            nombre="Sin comisión 0%",
+            porcentaje_base=Decimal("0.0000"),
+        )
+        self.esquema_sin_comision.canales_cobro.add(self.canal_caja)
+        self.canal_caja.esquema_comision_predeterminado = self.esquema_sin_comision
+        self.canal_caja.save()
+
+        self.esquema_no_asociado = EsquemaComision.objects.create(
+            nombre="Esquema no asociado",
+            porcentaje_base=Decimal("1.0000"),
+        )
+
+        self.concepto_consulta = ConceptoIngreso.objects.create(nombre="Consulta")
+        self.concepto_material = ConceptoIngreso.objects.create(
+            nombre="Ticket con material",
+            permite_material_adicional=True,
+            monto_material_sugerido=Decimal("50.00"),
+        )
+        self.origen = OrigenIngreso.objects.create(nombre="Consultorio")
+
+    def crear_ticket(self, **kwargs):
+        datos = {
+            "fecha": timezone.datetime(
+                2026, 6, 10, 10, 0, tzinfo=timezone.get_current_timezone()
+            ),
+            "estado": Ticket.ESTADO_PENDIENTE,
+            "nombre_referencia": "Referencia de cobro",
+            "origen": self.origen,
+        }
+        datos.update(kwargs)
+        return Ticket.objects.create(**datos)
+
+    def agregar_linea(
+        self,
+        ticket,
+        *,
+        concepto=None,
+        cantidad=Decimal("1.00"),
+        monto_unitario=Decimal("300.00"),
+        monto_material_cobrado=Decimal("0.00"),
+    ):
+        return TicketLinea.objects.create(
+            ticket=ticket,
+            concepto=concepto or self.concepto_consulta,
+            cantidad=cantidad,
+            monto_unitario=monto_unitario,
+            monto_material_cobrado=monto_material_cobrado,
+        )
+
+    def cobrar(self, ticket, **kwargs):
+        datos = {
+            "ticket": ticket,
+            "fecha_cobro": timezone.datetime(
+                2026, 6, 11, 12, 0, tzinfo=timezone.get_current_timezone()
+            ),
+            "canal_cobro": self.canal_tap,
+            "concepto_ingreso": self.concepto_consulta,
+            "notas": "Cobro en caja",
+        }
+        datos.update(kwargs)
+        return cobrar_ticket(**datos)
+
+    def test_ticket_monto_total_cobrado_suma_total_y_material(self):
+        ticket = self.crear_ticket()
+        self.agregar_linea(
+            ticket,
+            concepto=self.concepto_material,
+            monto_unitario=Decimal("160.00"),
+            monto_material_cobrado=Decimal("30.00"),
+        )
+        ticket.refresh_from_db()
+
+        self.assertEqual(ticket.monto_total, Decimal("160.00"))
+        self.assertEqual(ticket.monto_material_cobrado, Decimal("30.00"))
+        self.assertEqual(ticket.monto_total_cobrado, Decimal("190.00"))
+
+    def test_cobrar_ticket_pendiente_crea_un_ingreso_y_un_ticket_pago(self):
+        ticket = self.crear_ticket()
+        self.agregar_linea(ticket)
+
+        pago = self.cobrar(ticket)
+
+        self.assertEqual(Ingreso.objects.count(), 1)
+        self.assertEqual(TicketPago.objects.count(), 1)
+        self.assertEqual(pago.ticket, ticket)
+        self.assertEqual(pago.ingreso, Ingreso.objects.get())
+
+    def test_cobrar_ticket_cambia_estado_a_cobrado(self):
+        ticket = self.crear_ticket()
+        self.agregar_linea(ticket)
+
+        self.cobrar(ticket)
+        ticket.refresh_from_db()
+
+        self.assertEqual(ticket.estado, Ticket.ESTADO_COBRADO)
+
+    def test_ticket_cobrado_no_puede_cobrarse_dos_veces(self):
+        ticket = self.crear_ticket()
+        self.agregar_linea(ticket)
+        self.cobrar(ticket)
+
+        with self.assertRaises(ValidationError):
+            self.cobrar(ticket)
+
+        self.assertEqual(Ingreso.objects.count(), 1)
+        self.assertEqual(TicketPago.objects.count(), 1)
+
+    def test_ticket_abandonado_no_puede_cobrarse(self):
+        ticket = self.crear_ticket(estado=Ticket.ESTADO_ABANDONADO)
+        self.agregar_linea(ticket)
+
+        with self.assertRaises(ValidationError):
+            self.cobrar(ticket)
+
+        self.assertEqual(Ingreso.objects.count(), 0)
+        self.assertEqual(TicketPago.objects.count(), 0)
+
+    def test_ticket_cancelado_no_puede_cobrarse(self):
+        ticket = self.crear_ticket(estado=Ticket.ESTADO_CANCELADO)
+        self.agregar_linea(ticket)
+
+        with self.assertRaises(ValidationError):
+            self.cobrar(ticket)
+
+        self.assertEqual(Ingreso.objects.count(), 0)
+        self.assertEqual(TicketPago.objects.count(), 0)
+
+    def test_ticket_sin_lineas_no_puede_cobrarse(self):
+        ticket = self.crear_ticket()
+
+        with self.assertRaises(ValidationError):
+            self.cobrar(ticket)
+
+        self.assertEqual(Ingreso.objects.count(), 0)
+        self.assertEqual(TicketPago.objects.count(), 0)
+
+    def test_ingreso_fecha_usa_fecha_cobro_no_fecha_ticket(self):
+        fecha_ticket = timezone.datetime(
+            2026, 6, 10, 10, 0, tzinfo=timezone.get_current_timezone()
+        )
+        fecha_cobro = timezone.datetime(
+            2026, 6, 11, 12, 0, tzinfo=timezone.get_current_timezone()
+        )
+        ticket = self.crear_ticket(fecha=fecha_ticket)
+        self.agregar_linea(ticket)
+
+        pago = self.cobrar(ticket, fecha_cobro=fecha_cobro)
+
+        self.assertEqual(pago.ingreso.fecha, fecha_cobro)
+        self.assertNotEqual(pago.ingreso.fecha, fecha_ticket)
+
+    def test_ingreso_montos_resumen_salen_del_ticket(self):
+        ticket = self.crear_ticket()
+        self.agregar_linea(
+            ticket,
+            concepto=self.concepto_material,
+            monto_unitario=Decimal("160.00"),
+            monto_material_cobrado=Decimal("30.00"),
+        )
+
+        pago = self.cobrar(ticket, concepto_ingreso=self.concepto_material)
+
+        self.assertEqual(pago.ingreso.monto_procedimiento, Decimal("160.00"))
+        self.assertEqual(pago.ingreso.monto_material_cobrado, Decimal("30.00"))
+        self.assertEqual(pago.ingreso.monto_total, Decimal("190.00"))
+
+    def test_ingreso_calcula_comision_igual_que_ingresos_normales(self):
+        ticket = self.crear_ticket()
+        self.agregar_linea(
+            ticket,
+            concepto=self.concepto_material,
+            monto_unitario=Decimal("300.00"),
+            monto_material_cobrado=Decimal("50.00"),
+        )
+
+        pago = self.cobrar(ticket, concepto_ingreso=self.concepto_material)
+
+        self.assertEqual(pago.ingreso.esquema_comision, self.esquema_mercado_pago)
+        self.assertEqual(pago.ingreso.porcentaje_comision_aplicado, Decimal("4.0600"))
+        self.assertEqual(pago.ingreso.comision, Decimal("14.21"))
+        self.assertEqual(pago.ingreso.monto_neto, Decimal("335.79"))
+
+    def test_canal_con_esquema_predeterminado_lo_usa_en_ingreso_y_pago(self):
+        ticket = self.crear_ticket()
+        self.agregar_linea(ticket)
+
+        pago = self.cobrar(ticket)
+
+        self.assertEqual(pago.ingreso.esquema_comision, self.esquema_mercado_pago)
+        self.assertEqual(pago.esquema_comision, self.esquema_mercado_pago)
+
+    def test_esquema_no_asociado_al_canal_hace_fallar_el_cobro(self):
+        ticket = self.crear_ticket()
+        self.agregar_linea(ticket)
+
+        with self.assertRaises(ValidationError):
+            self.cobrar(ticket, esquema_comision=self.esquema_no_asociado)
+
+        ticket.refresh_from_db()
+        self.assertEqual(ticket.estado, Ticket.ESTADO_PENDIENTE)
+        self.assertEqual(Ingreso.objects.count(), 0)
+        self.assertEqual(TicketPago.objects.count(), 0)
+
+    def test_material_pool_no_cambia_antes_de_cobrar_y_cambia_al_cobrar(self):
+        GastoMaterial.objects.create(
+            fecha=timezone.now(),
+            monto=Decimal("100.00"),
+            descripcion="Material",
+        )
+        ticket = self.crear_ticket()
+        self.agregar_linea(
+            ticket,
+            concepto=self.concepto_material,
+            monto_material_cobrado=Decimal("50.00"),
+        )
+
+        self.assertEqual(Ingreso.calcular_pool_material_actual(), Decimal("100.00"))
+
+        self.cobrar(ticket, concepto_ingreso=self.concepto_material)
+
+        self.assertEqual(Ingreso.calcular_pool_material_actual(), Decimal("50.00"))
+
+    def test_material_recuperado_y_excedente_se_calculan_como_en_ingresos(self):
+        GastoMaterial.objects.create(
+            fecha=timezone.now(),
+            monto=Decimal("20.00"),
+            descripcion="Material",
+        )
+        ticket = self.crear_ticket()
+        self.agregar_linea(
+            ticket,
+            concepto=self.concepto_material,
+            monto_material_cobrado=Decimal("50.00"),
+        )
+
+        pago = self.cobrar(ticket, concepto_ingreso=self.concepto_material)
+
+        self.assertEqual(pago.ingreso.pool_material_antes, Decimal("20.00"))
+        self.assertEqual(pago.ingreso.material_recuperado, Decimal("20.00"))
+        self.assertEqual(pago.ingreso.material_excedente, Decimal("30.00"))
+        self.assertEqual(pago.ingreso.pool_material_despues, Decimal("0.00"))
+
+    def test_ticket_con_material_requiere_concepto_ingreso_que_permita_material(self):
+        ticket = self.crear_ticket()
+        self.agregar_linea(
+            ticket,
+            concepto=self.concepto_material,
+            monto_material_cobrado=Decimal("50.00"),
+        )
+
+        with self.assertRaises(ValidationError) as contexto:
+            self.cobrar(ticket, concepto_ingreso=self.concepto_consulta)
+
+        self.assertEqual(
+            contexto.exception.message_dict["concepto_ingreso"],
+            [
+                "El concepto resumen debe permitir material adicional "
+                "cuando el ticket tiene material cobrado."
+            ],
+        )
+        self.assertEqual(Ingreso.objects.count(), 0)
+        self.assertEqual(TicketPago.objects.count(), 0)
+
+    def test_si_falla_creacion_de_ingreso_no_queda_ticket_cobrado(self):
+        ticket = self.crear_ticket()
+        self.agregar_linea(ticket)
+
+        with self.assertRaises(ValidationError):
+            self.cobrar(ticket, esquema_comision=self.esquema_no_asociado)
+
+        ticket.refresh_from_db()
+        self.assertEqual(ticket.estado, Ticket.ESTADO_PENDIENTE)
+        self.assertEqual(Ingreso.objects.count(), 0)
+        self.assertEqual(TicketPago.objects.count(), 0)
+
+    def test_ticket_pago_ticket_es_one_to_one(self):
+        campo = TicketPago._meta.get_field("ticket")
+
+        self.assertIsInstance(campo, models.OneToOneField)
+        self.assertTrue(campo.unique)
+
+    def test_ticket_pago_ingreso_es_one_to_one(self):
+        campo = TicketPago._meta.get_field("ingreso")
+
+        self.assertIsInstance(campo, models.OneToOneField)
+        self.assertTrue(campo.unique)
