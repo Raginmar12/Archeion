@@ -401,6 +401,27 @@ class ChremataOperationsApiTests(TestCase):
         payload.update(overrides)
         return payload
 
+    def payload_crear_gasto_material(self, **overrides):
+        gasto_material = {
+            "fecha": "2026-06-11T12:00:00Z",
+            "monto": "120.00",
+            "descripcion": "Gasas y material de curación",
+            "notas": "Compra offline",
+        }
+        payload = {
+            "operation": "crear_gasto_material",
+            "operation_contract": "chremata.operation.crear_gasto_material.v1",
+            "device_id": "zephyros-cardputer",
+            "device_entry_id": str(uuid4()),
+            "gasto_material": gasto_material,
+        }
+        for key, value in overrides.items():
+            if key == "gasto_material":
+                payload["gasto_material"].update(value)
+            else:
+                payload[key] = value
+        return payload
+
     def payload_crear_ticket(self, **overrides):
         ticket = {
             "ticket_public_id": str(uuid4()),
@@ -560,7 +581,7 @@ class ChremataOperationsApiTests(TestCase):
         )
 
     def test_operation_desconocida_devuelve_400_y_se_registra_failed(self):
-        payload = self.payload_crear_ticket(operation="crear_gasto_material")
+        payload = self.payload_crear_ticket(operation="ajuste_inventario")
 
         response = self.post_operation(payload)
 
@@ -1295,6 +1316,160 @@ class ChremataOperationsApiTests(TestCase):
         self.assertEqual(Ingreso.calcular_pool_material_actual(), Decimal("100.00"))
         self.assertEqual(Ingreso.objects.count(), 0)
         self.assertEqual(TicketPago.objects.count(), 0)
+
+    def test_crear_gasto_material_con_token_valido_funciona(self):
+        response = self.post_operation(self.payload_crear_gasto_material())
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.json()["ok"])
+
+    def test_crear_gasto_material_sin_token_responde_401(self):
+        response = self.client.post(
+            self.url,
+            data=json.dumps(self.payload_crear_gasto_material()),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 401)
+
+    def test_crear_gasto_material_crea_gasto_y_no_crea_otros_registros(self):
+        payload = self.payload_crear_gasto_material()
+
+        response = self.post_operation(payload)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(GastoMaterial.objects.count(), 1)
+        gasto = GastoMaterial.objects.get()
+        self.assertEqual(
+            gasto.fecha,
+            datetime(2026, 6, 11, 12, tzinfo=datetime_timezone.utc),
+        )
+        self.assertEqual(gasto.monto, Decimal("120.00"))
+        self.assertEqual(gasto.descripcion, "Gasas y material de curación")
+        self.assertEqual(gasto.notas, "Compra offline")
+        self.assertEqual(Ticket.objects.count(), 0)
+        self.assertEqual(TicketLinea.objects.count(), 0)
+        self.assertEqual(TicketPago.objects.count(), 0)
+        self.assertEqual(Ingreso.objects.count(), 0)
+        operacion = OperacionDispositivoChremata.objects.get()
+        self.assertEqual(operacion.gasto_material, gasto)
+        self.assertIsNone(operacion.ticket)
+        self.assertIsNone(operacion.ingreso)
+        self.assertIsNone(operacion.ticket_pago)
+
+    def test_crear_gasto_material_respuesta_publica(self):
+        response = self.post_operation(self.payload_crear_gasto_material()).json()
+        result = response["result"]
+
+        self.assertNotIn("id", result)
+        self.assertNotIn("gasto_material_id", result)
+        self.assertEqual(result["fecha"], "2026-06-11T12:00:00Z")
+        self.assertEqual(result["monto"], "120.00")
+        self.assertEqual(result["descripcion"], "Gasas y material de curación")
+
+    def test_reenviar_crear_gasto_material_mismo_payload_es_idempotente(self):
+        payload = self.payload_crear_gasto_material()
+
+        primera = self.post_operation(payload)
+        segunda = self.post_operation(payload)
+
+        self.assertEqual(primera.status_code, 200)
+        self.assertEqual(segunda.status_code, 200)
+        self.assertFalse(primera.json()["duplicate"])
+        self.assertTrue(segunda.json()["duplicate"])
+        self.assertEqual(GastoMaterial.objects.count(), 1)
+
+    def test_crear_gasto_material_misma_llave_payload_distinto_devuelve_409(self):
+        payload = self.payload_crear_gasto_material()
+        self.post_operation(payload)
+        payload_distinto = self.payload_crear_gasto_material(
+            device_entry_id=payload["device_entry_id"],
+            gasto_material={"descripcion": "Otra descripción"},
+        )
+
+        response = self.post_operation(payload_distinto)
+
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(response.json()["error"]["code"], "payload_conflict")
+        self.assertEqual(GastoMaterial.objects.count(), 1)
+        self.assertEqual(
+            GastoMaterial.objects.get().descripcion,
+            "Gasas y material de curación",
+        )
+
+    def test_crear_gasto_material_falta_gasto_material_falla(self):
+        payload = self.payload_crear_gasto_material()
+        del payload["gasto_material"]
+
+        response = self.post_operation(payload)
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()["error"]["code"], "invalid_payload")
+        self.assertEqual(GastoMaterial.objects.count(), 0)
+
+    def test_crear_gasto_material_fecha_invalida_falla(self):
+        payload = self.payload_crear_gasto_material(
+            gasto_material={"fecha": "2026-06-11 12:00:00"},
+        )
+
+        response = self.post_operation(payload)
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()["error"]["code"], "invalid_datetime")
+        self.assertEqual(GastoMaterial.objects.count(), 0)
+
+    def test_crear_gasto_material_monto_invalido_falla(self):
+        payload = self.payload_crear_gasto_material(gasto_material={"monto": "abc"})
+
+        response = self.post_operation(payload)
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()["error"]["code"], "invalid_decimal")
+        self.assertEqual(GastoMaterial.objects.count(), 0)
+
+    def test_crear_gasto_material_monto_cero_o_negativo_falla(self):
+        for monto in ["0.00", "-1.00"]:
+            with self.subTest(monto=monto):
+                payload = self.payload_crear_gasto_material(
+                    gasto_material={"monto": monto},
+                )
+
+                response = self.post_operation(payload)
+
+                self.assertEqual(response.status_code, 422)
+                self.assertEqual(
+                    response.json()["error"]["code"], "business_validation_error"
+                )
+                self.assertEqual(GastoMaterial.objects.count(), 0)
+
+    def test_crear_gasto_material_fallido_queda_guardado_y_reenvio_devuelve_error(self):
+        payload = self.payload_crear_gasto_material(gasto_material={"monto": "0.00"})
+
+        primera = self.post_operation(payload)
+        segunda = self.post_operation(payload)
+
+        self.assertEqual(primera.status_code, 422)
+        self.assertEqual(segunda.status_code, 422)
+        self.assertTrue(segunda.json()["duplicate"])
+        self.assertEqual(segunda.json()["error"], primera.json()["error"])
+        self.assertEqual(GastoMaterial.objects.count(), 0)
+        self.assertEqual(
+            OperacionDispositivoChremata.objects.get().status,
+            OperacionDispositivoChremata.STATUS_FAILED,
+        )
+
+    def test_crear_gasto_material_actualiza_material_pool(self):
+        response = self.post_operation(self.payload_crear_gasto_material())
+
+        self.assertEqual(response.status_code, 200)
+        pool_response = self.client.get(
+            reverse("api-v1-chremata-material-pool"),
+            headers={"X-Codex-Device-Token": self.token_completo},
+        )
+        data = pool_response.json()
+        self.assertEqual(data["total_gastos_material"], "120.00")
+        self.assertEqual(data["pool_material_actual"], "120.00")
+        self.assertEqual(data["ultimo_gasto_material_fecha"], "2026-06-11T12:00:00Z")
 
 
 @override_settings(DEBUG=False, CODEX_DEVICE_TOKEN="")

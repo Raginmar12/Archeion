@@ -12,6 +12,7 @@ from .models import (
     CanalCobro,
     ConceptoIngreso,
     EsquemaComision,
+    GastoMaterial,
     OperacionDispositivoChremata,
     OrigenIngreso,
     PESOS_DECIMALES,
@@ -29,6 +30,8 @@ CANCELAR_TICKET = "cancelar_ticket"
 CANCELAR_TICKET_CONTRACT = "chremata.operation.cancelar_ticket.v1"
 ABANDONAR_TICKET = "abandonar_ticket"
 ABANDONAR_TICKET_CONTRACT = "chremata.operation.abandonar_ticket.v1"
+CREAR_GASTO_MATERIAL = "crear_gasto_material"
+CREAR_GASTO_MATERIAL_CONTRACT = "chremata.operation.crear_gasto_material.v1"
 
 
 class OperationValidationError(Exception):
@@ -244,13 +247,14 @@ def _validar_operacion_soportada(payload):
         COBRAR_TICKET: COBRAR_TICKET_CONTRACT,
         CANCELAR_TICKET: CANCELAR_TICKET_CONTRACT,
         ABANDONAR_TICKET: ABANDONAR_TICKET_CONTRACT,
+        CREAR_GASTO_MATERIAL: CREAR_GASTO_MATERIAL_CONTRACT,
     }
     operation = payload["operation"]
     if operation not in contratos:
         raise OperationValidationError(
             "unsupported_operation",
-            "Esta fase soporta crear_ticket, cobrar_ticket, "
-            "cancelar_ticket y abandonar_ticket.",
+            "Esta fase soporta crear_ticket, cobrar_ticket, cancelar_ticket, "
+            "abandonar_ticket y crear_gasto_material.",
             fields={"operation": "unsupported"},
             status_code=400,
         )
@@ -444,6 +448,59 @@ def _resultado_ticket_operativo(ticket, fecha, campo_fecha, *, incluir_nombre=Fa
     return result
 
 
+def _handle_crear_gasto_material(payload):
+    require_fields(payload, ["gasto_material"])
+    gasto_payload = payload["gasto_material"]
+    if not isinstance(gasto_payload, dict):
+        raise OperationValidationError(
+            "invalid_payload",
+            "gasto_material debe ser un objeto JSON.",
+            fields={"gasto_material": "invalid_object"},
+            status_code=400,
+        )
+    require_fields(gasto_payload, ["fecha", "monto"])
+    fecha = parse_datetime_utc_string(gasto_payload["fecha"], "gasto_material.fecha")
+    monto = parse_money_string(gasto_payload["monto"], "gasto_material.monto")
+    if monto <= Decimal("0.00"):
+        raise OperationValidationError(
+            "business_validation_error",
+            "El monto del gasto de material debe ser mayor que cero.",
+            fields={
+                "monto": ["El monto del gasto de material debe ser mayor que cero."]
+            },
+            status_code=422,
+        )
+
+    descripcion = gasto_payload.get("descripcion", "")
+    if not isinstance(descripcion, str):
+        raise OperationValidationError(
+            "invalid_payload",
+            "descripcion debe ser string.",
+            fields={"descripcion": "invalid_string"},
+            status_code=400,
+        )
+    notas = gasto_payload.get("notas", "")
+    if not isinstance(notas, str):
+        raise OperationValidationError(
+            "invalid_payload",
+            "notas debe ser string.",
+            fields={"notas": "invalid_string"},
+            status_code=400,
+        )
+
+    gasto = GastoMaterial.objects.create(
+        fecha=fecha,
+        monto=monto,
+        descripcion=descripcion,
+        notas=notas,
+    )
+    return gasto, {
+        "fecha": _datetime_utc_string(gasto.fecha),
+        "monto": _decimal_money_string(gasto.monto),
+        "descripcion": gasto.descripcion,
+    }
+
+
 def _handle_cerrar_ticket_operativo(payload, *, operation, servicio, campo_fecha):
     require_fields(payload, ["ticket_public_id", campo_fecha])
     ticket_public_id = parse_uuid(payload["ticket_public_id"], "ticket_public_id")
@@ -585,6 +642,7 @@ def _handle_cobrar_ticket(payload):
 
 def _procesar_payload_nuevo(payload):
     _validar_operacion_soportada(payload)
+    gasto_material = None
     if payload["operation"] == CREAR_TICKET:
         ticket, result = _handle_crear_ticket(payload)
         ingreso = None
@@ -598,19 +656,24 @@ def _procesar_payload_nuevo(payload):
             servicio=cancelar_ticket,
             campo_fecha="fecha_cancelacion",
         )
-    else:
+    elif payload["operation"] == ABANDONAR_TICKET:
         ticket, ingreso, pago, result = _handle_cerrar_ticket_operativo(
             payload,
             operation=ABANDONAR_TICKET,
             servicio=abandonar_ticket,
             campo_fecha="fecha_abandono",
         )
+    else:
+        gasto_material, result = _handle_crear_gasto_material(payload)
+        ticket = None
+        ingreso = None
+        pago = None
     response = _respuesta_base(
         payload,
         OperacionDispositivoChremata.STATUS_PROCESSED,
         result=result,
     )
-    return ticket, ingreso, pago, response
+    return ticket, ingreso, pago, gasto_material, response
 
 
 def _respuesta_error(payload, exc, *, duplicate=False):
@@ -671,7 +734,9 @@ def procesar_operacion_chremata(payload):
 
         try:
             with transaction.atomic():
-                ticket, ingreso, pago, response = _procesar_payload_nuevo(payload)
+                ticket, ingreso, pago, gasto_material, response = (
+                    _procesar_payload_nuevo(payload)
+                )
         except OperationValidationError as exc:
             response = _respuesta_error(payload, exc)
             operacion.status = exc.operation_status
@@ -694,6 +759,7 @@ def procesar_operacion_chremata(payload):
         operacion.ticket = ticket
         operacion.ingreso = ingreso
         operacion.ticket_pago = pago
+        operacion.gasto_material = gasto_material
         operacion.procesado_en = timezone.now()
         operacion.save(
             update_fields=[
@@ -702,6 +768,7 @@ def procesar_operacion_chremata(payload):
                 "ticket",
                 "ingreso",
                 "ticket_pago",
+                "gasto_material",
                 "procesado_en",
                 "actualizado_en",
             ],

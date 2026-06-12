@@ -779,6 +779,13 @@ class OperacionDispositivoChremata(models.Model):
         blank=True,
         related_name="operaciones_dispositivo",
     )
+    gasto_material = models.ForeignKey(
+        GastoMaterial,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="operaciones_dispositivo",
+    )
     recibido_en = models.DateTimeField(auto_now_add=True)
     procesado_en = models.DateTimeField(null=True, blank=True)
     actualizado_en = models.DateTimeField(auto_now=True)
