@@ -297,6 +297,23 @@ class ChremataOperationsApiTests(TestCase):
         self.device_token, self.token_completo = DeviceToken.crear("Zephyros")
         self.url = reverse("api-v1-chremata-operations")
         self.origen = OrigenIngreso.objects.create(nombre="Consultorio")
+        self.metodo_tarjeta = MetodoPago.objects.create(nombre="Tarjeta")
+        self.canal_tap = CanalCobro.objects.create(
+            nombre="Mercado Pago Tap",
+            metodo_pago=self.metodo_tarjeta,
+        )
+        self.esquema_mercado_pago = EsquemaComision.objects.create(
+            nombre="Mercado Pago 3.5% + IVA",
+            porcentaje_base=Decimal("3.5000"),
+            cobra_iva=True,
+        )
+        self.esquema_mercado_pago.canales_cobro.add(self.canal_tap)
+        self.canal_tap.esquema_comision_predeterminado = self.esquema_mercado_pago
+        self.canal_tap.save()
+        self.esquema_no_asociado = EsquemaComision.objects.create(
+            nombre="Esquema no asociado",
+            porcentaje_base=Decimal("1.0000"),
+        )
         self.concepto = ConceptoIngreso.objects.create(nombre="Consulta")
         self.concepto_material = ConceptoIngreso.objects.create(
             nombre="Curación con material",
@@ -315,6 +332,48 @@ class ChremataOperationsApiTests(TestCase):
             content_type="application/json",
             headers=headers,
         )
+
+    def crear_ticket_para_cobrar(
+        self,
+        *,
+        estado=Ticket.ESTADO_PENDIENTE,
+        concepto=None,
+        monto_unitario=Decimal("160.00"),
+        monto_material_cobrado=Decimal("0.00"),
+        crear_linea=True,
+    ):
+        ticket = Ticket.objects.create(
+            fecha=datetime(2026, 6, 10, 10, tzinfo=datetime_timezone.utc),
+            estado=estado,
+            nombre_referencia="Referencia de cobro",
+            origen=self.origen,
+        )
+        if crear_linea:
+            TicketLinea.objects.create(
+                ticket=ticket,
+                concepto=concepto or self.concepto,
+                cantidad=Decimal("1.00"),
+                monto_unitario=monto_unitario,
+                monto_material_cobrado=monto_material_cobrado,
+            )
+        ticket.refresh_from_db()
+        return ticket
+
+    def payload_cobrar_ticket(self, ticket, **overrides):
+        payload = {
+            "operation": "cobrar_ticket",
+            "operation_contract": "chremata.operation.cobrar_ticket.v1",
+            "device_id": "zephyros-cardputer",
+            "device_entry_id": str(uuid4()),
+            "ticket_public_id": str(ticket.public_id),
+            "fecha_cobro": "2026-06-11T12:00:00Z",
+            "canal_cobro_public_id": str(self.canal_tap.public_id),
+            "esquema_comision_public_id": None,
+            "concepto_ingreso_resumen_public_id": str(self.concepto.public_id),
+            "notas": "Cobro offline",
+        }
+        payload.update(overrides)
+        return payload
 
     def payload_crear_ticket(self, **overrides):
         ticket = {
@@ -475,7 +534,7 @@ class ChremataOperationsApiTests(TestCase):
         )
 
     def test_operation_desconocida_devuelve_400_y_se_registra_failed(self):
-        payload = self.payload_crear_ticket(operation="cobrar_ticket")
+        payload = self.payload_crear_ticket(operation="cancelar_ticket")
 
         response = self.post_operation(payload)
 
@@ -670,6 +729,246 @@ class ChremataOperationsApiTests(TestCase):
             primera.json()["error"],
         )
         self.assertEqual(OperacionDispositivoChremata.objects.count(), 1)
+
+    def test_cobrar_ticket_con_token_valido_funciona(self):
+        ticket = self.crear_ticket_para_cobrar()
+
+        response = self.post_operation(self.payload_cobrar_ticket(ticket))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.json()["ok"])
+
+    def test_cobrar_ticket_sin_token_responde_401(self):
+        ticket = self.crear_ticket_para_cobrar()
+
+        response = self.client.post(
+            self.url,
+            data=json.dumps(self.payload_cobrar_ticket(ticket)),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 401)
+
+    def test_cobrar_ticket_pendiente_crea_pago_ingreso_y_cambia_estado(self):
+        ticket = self.crear_ticket_para_cobrar()
+
+        response = self.post_operation(self.payload_cobrar_ticket(ticket))
+
+        self.assertEqual(response.status_code, 200)
+        ticket.refresh_from_db()
+        self.assertEqual(ticket.estado, Ticket.ESTADO_COBRADO)
+        self.assertEqual(TicketPago.objects.count(), 1)
+        self.assertEqual(Ingreso.objects.count(), 1)
+        operacion = OperacionDispositivoChremata.objects.get()
+        self.assertEqual(
+            operacion.status, OperacionDispositivoChremata.STATUS_PROCESSED
+        )
+        self.assertEqual(operacion.ticket, ticket)
+        self.assertEqual(operacion.ingreso, Ingreso.objects.get())
+        self.assertEqual(operacion.ticket_pago, TicketPago.objects.get())
+
+    def test_cobrar_ticket_respuesta_publica_incluye_snapshots_sin_ids_internos(self):
+        GastoMaterial.objects.create(
+            fecha=datetime(2026, 6, 10, 8, tzinfo=datetime_timezone.utc),
+            monto=Decimal("350.00"),
+            descripcion="Material",
+        )
+        ticket = self.crear_ticket_para_cobrar(
+            concepto=self.concepto_material,
+            monto_unitario=Decimal("160.00"),
+            monto_material_cobrado=Decimal("30.00"),
+        )
+        payload = self.payload_cobrar_ticket(
+            ticket,
+            concepto_ingreso_resumen_public_id=str(self.concepto_material.public_id),
+        )
+
+        data = self.post_operation(payload).json()
+        result = data["result"]
+
+        self.assertNotIn("id", result)
+        self.assertNotIn("ingreso_id", result)
+        self.assertNotIn("ticket_pago_id", result)
+        self.assertEqual(result["ticket_public_id"], str(ticket.public_id))
+        self.assertEqual(result["ticket_estado"], Ticket.ESTADO_COBRADO)
+        self.assertEqual(result["fecha_cobro"], "2026-06-11T12:00:00Z")
+        self.assertEqual(result["monto_total"], "160.00")
+        self.assertEqual(result["monto_material_cobrado"], "30.00")
+        self.assertEqual(result["monto_total_cobrado"], "190.00")
+        self.assertEqual(result["porcentaje_comision_aplicado"], "4.0600")
+        self.assertEqual(result["comision"], "7.71")
+        self.assertEqual(result["monto_neto"], "182.29")
+        self.assertEqual(result["material_recuperado"], "30.00")
+        self.assertEqual(result["material_excedente"], "0.00")
+        self.assertEqual(result["pool_material_antes"], "350.00")
+        self.assertEqual(result["pool_material_despues"], "320.00")
+
+    def test_reenviar_mismo_cobrar_ticket_no_duplica_ingreso_ni_pago(self):
+        ticket = self.crear_ticket_para_cobrar()
+        payload = self.payload_cobrar_ticket(ticket)
+
+        primera = self.post_operation(payload)
+        segunda = self.post_operation(payload)
+
+        self.assertEqual(primera.status_code, 200)
+        self.assertEqual(segunda.status_code, 200)
+        self.assertFalse(primera.json()["duplicate"])
+        self.assertTrue(segunda.json()["duplicate"])
+        self.assertEqual(Ingreso.objects.count(), 1)
+        self.assertEqual(TicketPago.objects.count(), 1)
+
+    def test_reenviar_cobrar_ticket_misma_llave_payload_distinto_devuelve_409(self):
+        ticket = self.crear_ticket_para_cobrar()
+        payload = self.payload_cobrar_ticket(ticket)
+        self.post_operation(payload)
+        payload_distinto = self.payload_cobrar_ticket(
+            ticket,
+            device_entry_id=payload["device_entry_id"],
+            notas="Otra nota",
+        )
+
+        response = self.post_operation(payload_distinto)
+
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(response.json()["error"]["code"], "payload_conflict")
+        self.assertEqual(Ingreso.objects.count(), 1)
+        self.assertEqual(TicketPago.objects.count(), 1)
+
+    def test_cobrar_ticket_referencias_inexistentes_devuelven_422(self):
+        casos = [
+            ("ticket_public_id", str(uuid4())),
+            ("canal_cobro_public_id", str(uuid4())),
+            ("esquema_comision_public_id", str(uuid4())),
+            ("concepto_ingreso_resumen_public_id", str(uuid4())),
+        ]
+        for campo, valor in casos:
+            with self.subTest(campo=campo):
+                ticket = self.crear_ticket_para_cobrar()
+                payload = self.payload_cobrar_ticket(ticket, **{campo: valor})
+
+                response = self.post_operation(payload)
+
+                self.assertEqual(response.status_code, 422)
+                self.assertEqual(
+                    response.json()["error"]["code"], "reference_not_found"
+                )
+
+    def test_cobrar_ticket_estados_no_pendientes_fallan(self):
+        for estado in [
+            Ticket.ESTADO_COBRADO,
+            Ticket.ESTADO_CANCELADO,
+            Ticket.ESTADO_ABANDONADO,
+        ]:
+            with self.subTest(estado=estado):
+                ticket = self.crear_ticket_para_cobrar(estado=estado)
+                payload = self.payload_cobrar_ticket(ticket)
+
+                response = self.post_operation(payload)
+
+                self.assertEqual(response.status_code, 422)
+                self.assertEqual(
+                    response.json()["error"]["code"], "business_validation_error"
+                )
+                self.assertEqual(Ingreso.objects.count(), 0)
+                self.assertEqual(TicketPago.objects.count(), 0)
+
+    def test_cobrar_ticket_sin_lineas_falla(self):
+        ticket = self.crear_ticket_para_cobrar(crear_linea=False)
+
+        response = self.post_operation(self.payload_cobrar_ticket(ticket))
+
+        self.assertEqual(response.status_code, 422)
+        self.assertEqual(response.json()["error"]["code"], "business_validation_error")
+        self.assertEqual(Ingreso.objects.count(), 0)
+        self.assertEqual(TicketPago.objects.count(), 0)
+
+    def test_cobrar_ticket_con_material_requiere_concepto_resumen_material(self):
+        ticket = self.crear_ticket_para_cobrar(
+            concepto=self.concepto_material,
+            monto_material_cobrado=Decimal("30.00"),
+        )
+
+        response = self.post_operation(self.payload_cobrar_ticket(ticket))
+
+        self.assertEqual(response.status_code, 422)
+        self.assertEqual(response.json()["error"]["code"], "business_validation_error")
+        self.assertEqual(Ingreso.objects.count(), 0)
+        self.assertEqual(TicketPago.objects.count(), 0)
+
+    def test_cobrar_ticket_esquema_no_asociado_falla_y_hace_rollback(self):
+        ticket = self.crear_ticket_para_cobrar()
+        payload = self.payload_cobrar_ticket(
+            ticket,
+            esquema_comision_public_id=str(self.esquema_no_asociado.public_id),
+        )
+
+        response = self.post_operation(payload)
+
+        self.assertEqual(response.status_code, 422)
+        self.assertEqual(response.json()["error"]["code"], "business_validation_error")
+        ticket.refresh_from_db()
+        self.assertEqual(ticket.estado, Ticket.ESTADO_PENDIENTE)
+        self.assertEqual(Ingreso.objects.count(), 0)
+        self.assertEqual(TicketPago.objects.count(), 0)
+        self.assertEqual(
+            OperacionDispositivoChremata.objects.get().status,
+            OperacionDispositivoChremata.STATUS_FAILED,
+        )
+
+    def test_reenvio_cobrar_ticket_fallido_devuelve_error_guardado(self):
+        ticket = self.crear_ticket_para_cobrar(crear_linea=False)
+        payload = self.payload_cobrar_ticket(ticket)
+
+        primera = self.post_operation(payload)
+        segunda = self.post_operation(payload)
+
+        self.assertEqual(primera.status_code, 422)
+        self.assertEqual(segunda.status_code, 422)
+        self.assertTrue(segunda.json()["duplicate"])
+        self.assertEqual(segunda.json()["error"], primera.json()["error"])
+        self.assertEqual(OperacionDispositivoChremata.objects.count(), 1)
+
+    def test_cobrar_ticket_afecta_pool_material_mediante_ingreso(self):
+        GastoMaterial.objects.create(
+            fecha=datetime(2026, 6, 10, 8, tzinfo=datetime_timezone.utc),
+            monto=Decimal("100.00"),
+            descripcion="Material",
+        )
+        ticket = self.crear_ticket_para_cobrar(
+            concepto=self.concepto_material,
+            monto_material_cobrado=Decimal("50.00"),
+        )
+        self.assertEqual(Ingreso.calcular_pool_material_actual(), Decimal("100.00"))
+
+        response = self.post_operation(
+            self.payload_cobrar_ticket(
+                ticket,
+                concepto_ingreso_resumen_public_id=str(
+                    self.concepto_material.public_id
+                ),
+            )
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(Ingreso.calcular_pool_material_actual(), Decimal("50.00"))
+        result = response.json()["result"]
+        self.assertEqual(result["material_recuperado"], "50.00")
+        self.assertEqual(result["material_excedente"], "0.00")
+        self.assertEqual(result["pool_material_antes"], "100.00")
+        self.assertEqual(result["pool_material_despues"], "50.00")
+
+    def test_cobrar_ticket_ingreso_fecha_usa_fecha_cobro_no_fecha_ticket(self):
+        ticket = self.crear_ticket_para_cobrar()
+
+        response = self.post_operation(self.payload_cobrar_ticket(ticket))
+
+        self.assertEqual(response.status_code, 200)
+        ingreso = Ingreso.objects.get()
+        self.assertEqual(
+            ingreso.fecha,
+            datetime(2026, 6, 11, 12, tzinfo=datetime_timezone.utc),
+        )
+        self.assertNotEqual(ingreso.fecha, ticket.fecha)
 
 
 @override_settings(DEBUG=False, CODEX_DEVICE_TOKEN="")

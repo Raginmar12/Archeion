@@ -4,20 +4,27 @@ from datetime import datetime, timezone as datetime_timezone
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from uuid import UUID
 
+from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.utils import timezone
 
 from .models import (
+    CanalCobro,
     ConceptoIngreso,
+    EsquemaComision,
     OperacionDispositivoChremata,
     OrigenIngreso,
     PESOS_DECIMALES,
+    PORCENTAJE_DECIMALES,
     Ticket,
     TicketLinea,
 )
+from .services import cobrar_ticket
 
 CREAR_TICKET = "crear_ticket"
 CREAR_TICKET_CONTRACT = "chremata.operation.crear_ticket.v1"
+COBRAR_TICKET = "cobrar_ticket"
+COBRAR_TICKET_CONTRACT = "chremata.operation.cobrar_ticket.v1"
 
 
 class OperationValidationError(Exception):
@@ -157,6 +164,39 @@ def get_by_public_id(modelo, public_id, field):
         ) from exc
 
 
+def _decimal_money_string(valor):
+    return str((valor or Decimal("0.00")).quantize(PESOS_DECIMALES))
+
+
+def _decimal_percentage_string(valor):
+    return str((valor or Decimal("0.0000")).quantize(PORCENTAJE_DECIMALES))
+
+
+def _datetime_utc_string(valor):
+    return (
+        valor.astimezone(datetime_timezone.utc)
+        .replace(microsecond=0)
+        .isoformat()
+        .replace("+00:00", "Z")
+    )
+
+
+def _validation_error_to_operation_error(exc):
+    if hasattr(exc, "message_dict"):
+        fields = {campo: mensajes for campo, mensajes in exc.message_dict.items()}
+        mensajes = [mensaje for mensajes in fields.values() for mensaje in mensajes]
+    else:
+        fields = {"__all__": exc.messages}
+        mensajes = exc.messages
+    message = mensajes[0] if mensajes else "La operación no pudo procesarse."
+    return OperationValidationError(
+        "business_validation_error",
+        message,
+        fields=fields,
+        status_code=422,
+    )
+
+
 def _respuesta_base(payload, status, *, duplicate=False, result=None, error=None):
     response = {
         "ok": error is None,
@@ -194,18 +234,23 @@ def _validar_campos_comunes(payload):
             )
 
 
-def _validar_operacion_crear_ticket(payload):
-    if payload["operation"] != CREAR_TICKET:
+def _validar_operacion_soportada(payload):
+    contratos = {
+        CREAR_TICKET: CREAR_TICKET_CONTRACT,
+        COBRAR_TICKET: COBRAR_TICKET_CONTRACT,
+    }
+    operation = payload["operation"]
+    if operation not in contratos:
         raise OperationValidationError(
             "unsupported_operation",
-            "Esta fase solo soporta operation=crear_ticket.",
+            "Esta fase solo soporta operation=crear_ticket y operation=cobrar_ticket.",
             fields={"operation": "unsupported"},
             status_code=400,
         )
-    if payload["operation_contract"] != CREAR_TICKET_CONTRACT:
+    if payload["operation_contract"] != contratos[operation]:
         raise OperationValidationError(
             "invalid_operation_contract",
-            "operation_contract no corresponde a crear_ticket v1.",
+            f"operation_contract no corresponde a {operation} v1.",
             fields={"operation_contract": "invalid"},
             status_code=400,
         )
@@ -376,15 +421,114 @@ def _handle_crear_ticket(payload):
     }
 
 
+def _handle_cobrar_ticket(payload):
+    require_fields(
+        payload,
+        [
+            "ticket_public_id",
+            "fecha_cobro",
+            "canal_cobro_public_id",
+            "concepto_ingreso_resumen_public_id",
+        ],
+    )
+    ticket_public_id = parse_uuid(payload["ticket_public_id"], "ticket_public_id")
+    fecha_cobro = parse_datetime_utc_string(payload["fecha_cobro"], "fecha_cobro")
+    canal_public_id = parse_uuid(
+        payload["canal_cobro_public_id"],
+        "canal_cobro_public_id",
+    )
+    concepto_public_id = parse_uuid(
+        payload["concepto_ingreso_resumen_public_id"],
+        "concepto_ingreso_resumen_public_id",
+    )
+
+    esquema_comision = None
+    if payload.get("esquema_comision_public_id") is not None:
+        esquema_public_id = parse_uuid(
+            payload["esquema_comision_public_id"],
+            "esquema_comision_public_id",
+        )
+        esquema_comision = get_by_public_id(
+            EsquemaComision,
+            esquema_public_id,
+            "esquema_comision_public_id",
+        )
+
+    notas = payload.get("notas", "")
+    if not isinstance(notas, str):
+        raise OperationValidationError(
+            "invalid_payload",
+            "notas debe ser string.",
+            fields={"notas": "invalid_string"},
+            status_code=400,
+        )
+
+    ticket = get_by_public_id(Ticket, ticket_public_id, "ticket_public_id")
+    canal_cobro = get_by_public_id(CanalCobro, canal_public_id, "canal_cobro_public_id")
+    concepto_ingreso = get_by_public_id(
+        ConceptoIngreso,
+        concepto_public_id,
+        "concepto_ingreso_resumen_public_id",
+    )
+
+    try:
+        pago = cobrar_ticket(
+            ticket=ticket,
+            fecha_cobro=fecha_cobro,
+            canal_cobro=canal_cobro,
+            concepto_ingreso=concepto_ingreso,
+            esquema_comision=esquema_comision,
+            notas=notas,
+        )
+    except ValidationError as exc:
+        raise _validation_error_to_operation_error(exc) from exc
+
+    ticket = pago.ticket
+    ingreso = pago.ingreso
+    ticket.refresh_from_db()
+
+    return (
+        ticket,
+        ingreso,
+        pago,
+        {
+            "ticket_public_id": str(ticket.public_id),
+            "ticket_estado": ticket.estado,
+            "fecha_cobro": _datetime_utc_string(ingreso.fecha),
+            "monto_total": _decimal_money_string(ticket.monto_total),
+            "monto_material_cobrado": _decimal_money_string(
+                ticket.monto_material_cobrado,
+            ),
+            "monto_total_cobrado": _decimal_money_string(ingreso.monto_total),
+            "porcentaje_comision_aplicado": _decimal_percentage_string(
+                ingreso.porcentaje_comision_aplicado,
+            ),
+            "comision": _decimal_money_string(ingreso.comision),
+            "monto_neto": _decimal_money_string(ingreso.monto_neto),
+            "material_recuperado": _decimal_money_string(ingreso.material_recuperado),
+            "material_excedente": _decimal_money_string(ingreso.material_excedente),
+            "pool_material_antes": _decimal_money_string(ingreso.pool_material_antes),
+            "pool_material_despues": _decimal_money_string(
+                ingreso.pool_material_despues
+            ),
+        },
+    )
+
+
 def _procesar_payload_nuevo(payload):
-    _validar_operacion_crear_ticket(payload)
-    ticket, result = _handle_crear_ticket(payload)
+    _validar_operacion_soportada(payload)
+    if payload["operation"] == CREAR_TICKET:
+        ticket, result = _handle_crear_ticket(payload)
+        ingreso = None
+        pago = None
+    else:
+        ticket, ingreso, pago, result = _handle_cobrar_ticket(payload)
     response = _respuesta_base(
         payload,
         OperacionDispositivoChremata.STATUS_PROCESSED,
         result=result,
     )
-    return ticket, response
+    return ticket, ingreso, pago, response
 
 
 def _respuesta_error(payload, exc, *, duplicate=False):
@@ -445,7 +589,7 @@ def procesar_operacion_chremata(payload):
 
         try:
             with transaction.atomic():
-                ticket, response = _procesar_payload_nuevo(payload)
+                ticket, ingreso, pago, response = _procesar_payload_nuevo(payload)
         except OperationValidationError as exc:
             response = _respuesta_error(payload, exc)
             operacion.status = exc.operation_status
@@ -466,12 +610,16 @@ def procesar_operacion_chremata(payload):
         operacion.status = OperacionDispositivoChremata.STATUS_PROCESSED
         operacion.response = response
         operacion.ticket = ticket
+        operacion.ingreso = ingreso
+        operacion.ticket_pago = pago
         operacion.procesado_en = timezone.now()
         operacion.save(
             update_fields=[
                 "status",
                 "response",
                 "ticket",
+                "ingreso",
+                "ticket_pago",
                 "procesado_en",
                 "actualizado_en",
             ],
