@@ -375,6 +375,32 @@ class ChremataOperationsApiTests(TestCase):
         payload.update(overrides)
         return payload
 
+    def payload_cancelar_ticket(self, ticket, **overrides):
+        payload = {
+            "operation": "cancelar_ticket",
+            "operation_contract": "chremata.operation.cancelar_ticket.v1",
+            "device_id": "zephyros-cardputer",
+            "device_entry_id": str(uuid4()),
+            "ticket_public_id": str(ticket.public_id),
+            "fecha_cancelacion": "2026-06-11T12:00:00Z",
+            "notas": "Cancelación offline",
+        }
+        payload.update(overrides)
+        return payload
+
+    def payload_abandonar_ticket(self, ticket, **overrides):
+        payload = {
+            "operation": "abandonar_ticket",
+            "operation_contract": "chremata.operation.abandonar_ticket.v1",
+            "device_id": "zephyros-cardputer",
+            "device_entry_id": str(uuid4()),
+            "ticket_public_id": str(ticket.public_id),
+            "fecha_abandono": "2026-06-11T12:00:00Z",
+            "notas": "Abandono offline",
+        }
+        payload.update(overrides)
+        return payload
+
     def payload_crear_ticket(self, **overrides):
         ticket = {
             "ticket_public_id": str(uuid4()),
@@ -534,7 +560,7 @@ class ChremataOperationsApiTests(TestCase):
         )
 
     def test_operation_desconocida_devuelve_400_y_se_registra_failed(self):
-        payload = self.payload_crear_ticket(operation="cancelar_ticket")
+        payload = self.payload_crear_ticket(operation="crear_gasto_material")
 
         response = self.post_operation(payload)
 
@@ -969,6 +995,306 @@ class ChremataOperationsApiTests(TestCase):
             datetime(2026, 6, 11, 12, tzinfo=datetime_timezone.utc),
         )
         self.assertNotEqual(ingreso.fecha, ticket.fecha)
+
+    def test_cancelar_ticket_con_token_valido_funciona(self):
+        ticket = self.crear_ticket_para_cobrar()
+
+        response = self.post_operation(self.payload_cancelar_ticket(ticket))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.json()["ok"])
+
+    def test_cancelar_ticket_sin_token_responde_401(self):
+        ticket = self.crear_ticket_para_cobrar()
+
+        response = self.client.post(
+            self.url,
+            data=json.dumps(self.payload_cancelar_ticket(ticket)),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 401)
+
+    def test_cancelar_ticket_cambia_estado_y_no_crea_registros_oficiales(self):
+        ticket = self.crear_ticket_para_cobrar(
+            concepto=self.concepto_material,
+            monto_material_cobrado=Decimal("30.00"),
+        )
+        monto_total = ticket.monto_total
+        monto_material = ticket.monto_material_cobrado
+
+        response = self.post_operation(self.payload_cancelar_ticket(ticket))
+
+        self.assertEqual(response.status_code, 200)
+        ticket.refresh_from_db()
+        self.assertEqual(ticket.estado, Ticket.ESTADO_CANCELADO)
+        self.assertEqual(ticket.lineas.count(), 1)
+        self.assertEqual(ticket.monto_total, monto_total)
+        self.assertEqual(ticket.monto_material_cobrado, monto_material)
+        self.assertEqual(Ingreso.objects.count(), 0)
+        self.assertEqual(TicketPago.objects.count(), 0)
+        operacion = OperacionDispositivoChremata.objects.get()
+        self.assertEqual(
+            operacion.status, OperacionDispositivoChremata.STATUS_PROCESSED
+        )
+        self.assertEqual(operacion.ticket, ticket)
+        self.assertIsNone(operacion.ingreso)
+        self.assertIsNone(operacion.ticket_pago)
+
+    def test_cancelar_ticket_respuesta_publica(self):
+        ticket = self.crear_ticket_para_cobrar(
+            concepto=self.concepto_material,
+            monto_material_cobrado=Decimal("30.00"),
+        )
+
+        data = self.post_operation(self.payload_cancelar_ticket(ticket)).json()
+        result = data["result"]
+
+        self.assertNotIn("id", result)
+        self.assertNotIn("ingreso_id", result)
+        self.assertNotIn("ticket_pago_id", result)
+        self.assertEqual(result["ticket_public_id"], str(ticket.public_id))
+        self.assertEqual(result["ticket_estado"], Ticket.ESTADO_CANCELADO)
+        self.assertEqual(result["fecha_cancelacion"], "2026-06-11T12:00:00Z")
+        self.assertEqual(result["monto_total"], "160.00")
+        self.assertEqual(result["monto_material_cobrado"], "30.00")
+        self.assertEqual(result["monto_total_cobrado"], "190.00")
+
+    def test_reenviar_cancelar_ticket_mismo_payload_es_idempotente(self):
+        ticket = self.crear_ticket_para_cobrar()
+        payload = self.payload_cancelar_ticket(ticket)
+
+        primera = self.post_operation(payload)
+        segunda = self.post_operation(payload)
+
+        self.assertEqual(primera.status_code, 200)
+        self.assertEqual(segunda.status_code, 200)
+        self.assertFalse(primera.json()["duplicate"])
+        self.assertTrue(segunda.json()["duplicate"])
+        self.assertEqual(Ticket.objects.get().estado, Ticket.ESTADO_CANCELADO)
+        self.assertEqual(Ingreso.objects.count(), 0)
+        self.assertEqual(TicketPago.objects.count(), 0)
+
+    def test_cancelar_ticket_misma_llave_payload_distinto_devuelve_409(self):
+        ticket = self.crear_ticket_para_cobrar()
+        payload = self.payload_cancelar_ticket(ticket)
+        self.post_operation(payload)
+        payload_distinto = self.payload_cancelar_ticket(
+            ticket,
+            device_entry_id=payload["device_entry_id"],
+            notas="Otra nota",
+        )
+
+        response = self.post_operation(payload_distinto)
+
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(response.json()["error"]["code"], "payload_conflict")
+
+    def test_cancelar_ticket_referencia_inexistente_devuelve_422(self):
+        ticket = self.crear_ticket_para_cobrar()
+        payload = self.payload_cancelar_ticket(ticket, ticket_public_id=str(uuid4()))
+
+        response = self.post_operation(payload)
+
+        self.assertEqual(response.status_code, 422)
+        self.assertEqual(response.json()["error"]["code"], "reference_not_found")
+
+    def test_cancelar_ticket_estados_no_pendientes_fallan(self):
+        for estado in [
+            Ticket.ESTADO_COBRADO,
+            Ticket.ESTADO_ABANDONADO,
+            Ticket.ESTADO_CANCELADO,
+        ]:
+            with self.subTest(estado=estado):
+                ticket = self.crear_ticket_para_cobrar(estado=estado)
+                payload = self.payload_cancelar_ticket(ticket)
+
+                response = self.post_operation(payload)
+
+                self.assertEqual(response.status_code, 422)
+                self.assertEqual(
+                    response.json()["error"]["code"], "business_validation_error"
+                )
+                self.assertEqual(Ingreso.objects.count(), 0)
+                self.assertEqual(TicketPago.objects.count(), 0)
+
+    def test_cancelar_ticket_fallido_queda_guardado_y_reenvio_devuelve_error(self):
+        ticket = self.crear_ticket_para_cobrar(estado=Ticket.ESTADO_CANCELADO)
+        payload = self.payload_cancelar_ticket(ticket)
+
+        primera = self.post_operation(payload)
+        segunda = self.post_operation(payload)
+
+        self.assertEqual(primera.status_code, 422)
+        self.assertEqual(segunda.status_code, 422)
+        self.assertTrue(segunda.json()["duplicate"])
+        self.assertEqual(segunda.json()["error"], primera.json()["error"])
+        self.assertEqual(
+            OperacionDispositivoChremata.objects.get().status,
+            OperacionDispositivoChremata.STATUS_FAILED,
+        )
+
+    def test_abandonar_ticket_con_token_valido_funciona(self):
+        ticket = self.crear_ticket_para_cobrar()
+
+        response = self.post_operation(self.payload_abandonar_ticket(ticket))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.json()["ok"])
+
+    def test_abandonar_ticket_sin_token_responde_401(self):
+        ticket = self.crear_ticket_para_cobrar()
+
+        response = self.client.post(
+            self.url,
+            data=json.dumps(self.payload_abandonar_ticket(ticket)),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 401)
+
+    def test_abandonar_ticket_cambia_estado_y_conserva_datos_sin_registros_oficiales(
+        self,
+    ):
+        ticket = self.crear_ticket_para_cobrar(
+            concepto=self.concepto_material,
+            monto_material_cobrado=Decimal("30.00"),
+        )
+        nombre_referencia = ticket.nombre_referencia
+        monto_total = ticket.monto_total
+        monto_material = ticket.monto_material_cobrado
+
+        response = self.post_operation(self.payload_abandonar_ticket(ticket))
+
+        self.assertEqual(response.status_code, 200)
+        ticket.refresh_from_db()
+        self.assertEqual(ticket.estado, Ticket.ESTADO_ABANDONADO)
+        self.assertEqual(ticket.nombre_referencia, nombre_referencia)
+        self.assertEqual(ticket.lineas.count(), 1)
+        self.assertEqual(ticket.monto_total, monto_total)
+        self.assertEqual(ticket.monto_material_cobrado, monto_material)
+        self.assertEqual(Ingreso.objects.count(), 0)
+        self.assertEqual(TicketPago.objects.count(), 0)
+        operacion = OperacionDispositivoChremata.objects.get()
+        self.assertEqual(operacion.ticket, ticket)
+        self.assertIsNone(operacion.ingreso)
+        self.assertIsNone(operacion.ticket_pago)
+
+    def test_abandonar_ticket_respuesta_publica(self):
+        ticket = self.crear_ticket_para_cobrar(
+            concepto=self.concepto_material,
+            monto_material_cobrado=Decimal("30.00"),
+        )
+
+        data = self.post_operation(self.payload_abandonar_ticket(ticket)).json()
+        result = data["result"]
+
+        self.assertNotIn("id", result)
+        self.assertNotIn("ingreso_id", result)
+        self.assertNotIn("ticket_pago_id", result)
+        self.assertEqual(result["ticket_public_id"], str(ticket.public_id))
+        self.assertEqual(result["ticket_estado"], Ticket.ESTADO_ABANDONADO)
+        self.assertEqual(result["fecha_abandono"], "2026-06-11T12:00:00Z")
+        self.assertEqual(result["nombre_referencia"], "Referencia de cobro")
+        self.assertEqual(result["monto_total"], "160.00")
+        self.assertEqual(result["monto_material_cobrado"], "30.00")
+        self.assertEqual(result["monto_total_cobrado"], "190.00")
+
+    def test_reenviar_abandonar_ticket_mismo_payload_es_idempotente(self):
+        ticket = self.crear_ticket_para_cobrar()
+        payload = self.payload_abandonar_ticket(ticket)
+
+        primera = self.post_operation(payload)
+        segunda = self.post_operation(payload)
+
+        self.assertEqual(primera.status_code, 200)
+        self.assertEqual(segunda.status_code, 200)
+        self.assertFalse(primera.json()["duplicate"])
+        self.assertTrue(segunda.json()["duplicate"])
+        self.assertEqual(Ticket.objects.get().estado, Ticket.ESTADO_ABANDONADO)
+        self.assertEqual(Ingreso.objects.count(), 0)
+        self.assertEqual(TicketPago.objects.count(), 0)
+
+    def test_abandonar_ticket_misma_llave_payload_distinto_devuelve_409(self):
+        ticket = self.crear_ticket_para_cobrar()
+        payload = self.payload_abandonar_ticket(ticket)
+        self.post_operation(payload)
+        payload_distinto = self.payload_abandonar_ticket(
+            ticket,
+            device_entry_id=payload["device_entry_id"],
+            notas="Otra nota",
+        )
+
+        response = self.post_operation(payload_distinto)
+
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(response.json()["error"]["code"], "payload_conflict")
+
+    def test_abandonar_ticket_referencia_inexistente_devuelve_422(self):
+        ticket = self.crear_ticket_para_cobrar()
+        payload = self.payload_abandonar_ticket(ticket, ticket_public_id=str(uuid4()))
+
+        response = self.post_operation(payload)
+
+        self.assertEqual(response.status_code, 422)
+        self.assertEqual(response.json()["error"]["code"], "reference_not_found")
+
+    def test_abandonar_ticket_estados_no_pendientes_fallan(self):
+        for estado in [
+            Ticket.ESTADO_COBRADO,
+            Ticket.ESTADO_CANCELADO,
+            Ticket.ESTADO_ABANDONADO,
+        ]:
+            with self.subTest(estado=estado):
+                ticket = self.crear_ticket_para_cobrar(estado=estado)
+                payload = self.payload_abandonar_ticket(ticket)
+
+                response = self.post_operation(payload)
+
+                self.assertEqual(response.status_code, 422)
+                self.assertEqual(
+                    response.json()["error"]["code"], "business_validation_error"
+                )
+                self.assertEqual(Ingreso.objects.count(), 0)
+                self.assertEqual(TicketPago.objects.count(), 0)
+
+    def test_abandonar_ticket_fallido_queda_guardado_y_reenvio_devuelve_error(self):
+        ticket = self.crear_ticket_para_cobrar(estado=Ticket.ESTADO_ABANDONADO)
+        payload = self.payload_abandonar_ticket(ticket)
+
+        primera = self.post_operation(payload)
+        segunda = self.post_operation(payload)
+
+        self.assertEqual(primera.status_code, 422)
+        self.assertEqual(segunda.status_code, 422)
+        self.assertTrue(segunda.json()["duplicate"])
+        self.assertEqual(segunda.json()["error"], primera.json()["error"])
+        self.assertEqual(
+            OperacionDispositivoChremata.objects.get().status,
+            OperacionDispositivoChremata.STATUS_FAILED,
+        )
+
+    def test_cancelar_y_abandonar_ticket_no_cambian_material_pool(self):
+        GastoMaterial.objects.create(
+            fecha=datetime(2026, 6, 10, 8, tzinfo=datetime_timezone.utc),
+            monto=Decimal("100.00"),
+            descripcion="Material",
+        )
+        ticket_cancelar = self.crear_ticket_para_cobrar(
+            concepto=self.concepto_material,
+            monto_material_cobrado=Decimal("50.00"),
+        )
+        ticket_abandonar = self.crear_ticket_para_cobrar(
+            concepto=self.concepto_material,
+            monto_material_cobrado=Decimal("30.00"),
+        )
+
+        self.post_operation(self.payload_cancelar_ticket(ticket_cancelar))
+        self.post_operation(self.payload_abandonar_ticket(ticket_abandonar))
+
+        self.assertEqual(Ingreso.calcular_pool_material_actual(), Decimal("100.00"))
+        self.assertEqual(Ingreso.objects.count(), 0)
+        self.assertEqual(TicketPago.objects.count(), 0)
 
 
 @override_settings(DEBUG=False, CODEX_DEVICE_TOKEN="")

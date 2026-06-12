@@ -81,3 +81,59 @@ def cobrar_ticket(
         ticket_bloqueado.save(update_fields=["estado", "actualizado_en"])
 
         return pago
+
+
+def _anexar_nota_operativa(notas_actuales, *, etiqueta, fecha, notas):
+    fecha_iso = fecha.astimezone().replace(microsecond=0).isoformat()
+    nota_operativa = f"{etiqueta} el {fecha_iso}."
+    if notas:
+        nota_operativa = f"{nota_operativa}\n{notas}"
+    if notas_actuales:
+        return f"{notas_actuales}\n\n{nota_operativa}"
+    return nota_operativa
+
+
+def _cambiar_estado_ticket_operativo(
+    *, ticket, nuevo_estado, fecha, etiqueta, notas=""
+):
+    with transaction.atomic():
+        ticket_bloqueado = Ticket.objects.select_for_update().get(pk=ticket.pk)
+
+        if ticket_bloqueado.estado != Ticket.ESTADO_PENDIENTE:
+            raise ValidationError(
+                {"estado": "Solo se pueden modificar tickets pendientes."},
+            )
+
+        ticket_bloqueado.estado = nuevo_estado
+        ticket_bloqueado.notas = _anexar_nota_operativa(
+            ticket_bloqueado.notas,
+            etiqueta=etiqueta,
+            fecha=fecha,
+            notas=notas,
+        )
+        ticket_bloqueado.save(update_fields=["estado", "notas", "actualizado_en"])
+        return ticket_bloqueado
+
+
+def cancelar_ticket(*, ticket, fecha_cancelacion, notas=""):
+    """Cancela un ticket pendiente sin afectar Ingreso, TicketPago ni material pool."""
+
+    return _cambiar_estado_ticket_operativo(
+        ticket=ticket,
+        nuevo_estado=Ticket.ESTADO_CANCELADO,
+        fecha=fecha_cancelacion,
+        etiqueta="Ticket cancelado",
+        notas=notas,
+    )
+
+
+def abandonar_ticket(*, ticket, fecha_abandono, notas=""):
+    """Marca un ticket pendiente como abandonado sin afectar registros oficiales."""
+
+    return _cambiar_estado_ticket_operativo(
+        ticket=ticket,
+        nuevo_estado=Ticket.ESTADO_ABANDONADO,
+        fecha=fecha_abandono,
+        etiqueta="Ticket abandonado",
+        notas=notas,
+    )

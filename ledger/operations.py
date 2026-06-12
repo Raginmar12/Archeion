@@ -19,12 +19,16 @@ from .models import (
     Ticket,
     TicketLinea,
 )
-from .services import cobrar_ticket
+from .services import abandonar_ticket, cancelar_ticket, cobrar_ticket
 
 CREAR_TICKET = "crear_ticket"
 CREAR_TICKET_CONTRACT = "chremata.operation.crear_ticket.v1"
 COBRAR_TICKET = "cobrar_ticket"
 COBRAR_TICKET_CONTRACT = "chremata.operation.cobrar_ticket.v1"
+CANCELAR_TICKET = "cancelar_ticket"
+CANCELAR_TICKET_CONTRACT = "chremata.operation.cancelar_ticket.v1"
+ABANDONAR_TICKET = "abandonar_ticket"
+ABANDONAR_TICKET_CONTRACT = "chremata.operation.abandonar_ticket.v1"
 
 
 class OperationValidationError(Exception):
@@ -238,12 +242,15 @@ def _validar_operacion_soportada(payload):
     contratos = {
         CREAR_TICKET: CREAR_TICKET_CONTRACT,
         COBRAR_TICKET: COBRAR_TICKET_CONTRACT,
+        CANCELAR_TICKET: CANCELAR_TICKET_CONTRACT,
+        ABANDONAR_TICKET: ABANDONAR_TICKET_CONTRACT,
     }
     operation = payload["operation"]
     if operation not in contratos:
         raise OperationValidationError(
             "unsupported_operation",
-            "Esta fase solo soporta operation=crear_ticket y operation=cobrar_ticket.",
+            "Esta fase soporta crear_ticket, cobrar_ticket, "
+            "cancelar_ticket y abandonar_ticket.",
             fields={"operation": "unsupported"},
             status_code=400,
         )
@@ -421,6 +428,67 @@ def _handle_crear_ticket(payload):
     }
 
 
+def _resultado_ticket_operativo(ticket, fecha, campo_fecha, *, incluir_nombre=False):
+    result = {
+        "ticket_public_id": str(ticket.public_id),
+        "ticket_estado": ticket.estado,
+        campo_fecha: _datetime_utc_string(fecha),
+        "monto_total": _decimal_money_string(ticket.monto_total),
+        "monto_material_cobrado": _decimal_money_string(
+            ticket.monto_material_cobrado,
+        ),
+        "monto_total_cobrado": _decimal_money_string(ticket.monto_total_cobrado),
+    }
+    if incluir_nombre:
+        result["nombre_referencia"] = ticket.nombre_referencia
+    return result
+
+
+def _handle_cerrar_ticket_operativo(payload, *, operation, servicio, campo_fecha):
+    require_fields(payload, ["ticket_public_id", campo_fecha])
+    ticket_public_id = parse_uuid(payload["ticket_public_id"], "ticket_public_id")
+    fecha = parse_datetime_utc_string(payload[campo_fecha], campo_fecha)
+    notas = payload.get("notas", "")
+    if not isinstance(notas, str):
+        raise OperationValidationError(
+            "invalid_payload",
+            "notas debe ser string.",
+            fields={"notas": "invalid_string"},
+            status_code=400,
+        )
+
+    ticket = get_by_public_id(Ticket, ticket_public_id, "ticket_public_id")
+
+    try:
+        if operation == CANCELAR_TICKET:
+            ticket = servicio(
+                ticket=ticket,
+                fecha_cancelacion=fecha,
+                notas=notas,
+            )
+        else:
+            ticket = servicio(
+                ticket=ticket,
+                fecha_abandono=fecha,
+                notas=notas,
+            )
+    except ValidationError as exc:
+        raise _validation_error_to_operation_error(exc) from exc
+
+    ticket.refresh_from_db()
+    return (
+        ticket,
+        None,
+        None,
+        _resultado_ticket_operativo(
+            ticket,
+            fecha,
+            campo_fecha,
+            incluir_nombre=operation == ABANDONAR_TICKET,
+        ),
+    )
+
+
 def _handle_cobrar_ticket(payload):
     require_fields(
         payload,
@@ -521,8 +589,22 @@ def _procesar_payload_nuevo(payload):
         ticket, result = _handle_crear_ticket(payload)
         ingreso = None
         pago = None
-    else:
+    elif payload["operation"] == COBRAR_TICKET:
         ticket, ingreso, pago, result = _handle_cobrar_ticket(payload)
+    elif payload["operation"] == CANCELAR_TICKET:
+        ticket, ingreso, pago, result = _handle_cerrar_ticket_operativo(
+            payload,
+            operation=CANCELAR_TICKET,
+            servicio=cancelar_ticket,
+            campo_fecha="fecha_cancelacion",
+        )
+    else:
+        ticket, ingreso, pago, result = _handle_cerrar_ticket_operativo(
+            payload,
+            operation=ABANDONAR_TICKET,
+            servicio=abandonar_ticket,
+            campo_fecha="fecha_abandono",
+        )
     response = _respuesta_base(
         payload,
         OperacionDispositivoChremata.STATUS_PROCESSED,
