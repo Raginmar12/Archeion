@@ -730,3 +730,69 @@ class TicketPago(models.Model):
         return (
             f"{self.fecha.date()} - ticket {self.ticket_id} - ingreso {self.ingreso_id}"
         )
+
+
+class OperacionDispositivoChremata(models.Model):
+    STATUS_RECEIVED = "received"
+    STATUS_PROCESSED = "processed"
+    STATUS_FAILED = "failed"
+    STATUS_CONFLICT = "conflict"
+
+    STATUS_CHOICES = (
+        (STATUS_RECEIVED, "received"),
+        (STATUS_PROCESSED, "processed"),
+        (STATUS_FAILED, "failed"),
+        (STATUS_CONFLICT, "conflict"),
+    )
+
+    device_id = models.CharField(max_length=100)
+    device_entry_id = models.CharField(max_length=100)
+    operation = models.CharField(max_length=50)
+    operation_contract = models.CharField(max_length=150)
+    payload = models.JSONField()
+    payload_hash = models.CharField(max_length=64)
+    status = models.CharField(
+        max_length=20,
+        choices=STATUS_CHOICES,
+        default=STATUS_RECEIVED,
+    )
+    response = models.JSONField(null=True, blank=True)
+    error = models.JSONField(null=True, blank=True)
+    ticket = models.ForeignKey(
+        Ticket,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="operaciones_dispositivo",
+    )
+    ingreso = models.ForeignKey(
+        Ingreso,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="operaciones_dispositivo",
+    )
+    ticket_pago = models.ForeignKey(
+        TicketPago,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="operaciones_dispositivo",
+    )
+    recibido_en = models.DateTimeField(auto_now_add=True)
+    procesado_en = models.DateTimeField(null=True, blank=True)
+    actualizado_en = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-recibido_en", "-id"]
+        verbose_name = "operación de dispositivo Chremata"
+        verbose_name_plural = "operaciones de dispositivo Chremata"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["device_id", "device_entry_id"],
+                name="uniq_chremata_operation_device_entry",
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.device_id} - {self.device_entry_id} - {self.operation}"

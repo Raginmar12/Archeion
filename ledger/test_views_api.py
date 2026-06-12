@@ -1,7 +1,8 @@
+import json
 from datetime import datetime, timezone as datetime_timezone
 from decimal import Decimal
 from unittest.mock import patch
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from django.test import TestCase, override_settings
 from django.urls import reverse
@@ -15,7 +16,11 @@ from .models import (
     GastoMaterial,
     Ingreso,
     MetodoPago,
+    OperacionDispositivoChremata,
     OrigenIngreso,
+    Ticket,
+    TicketLinea,
+    TicketPago,
 )
 
 
@@ -284,6 +289,387 @@ class CatalogosApiTests(TestCase):
         self.assertIsInstance(esquema["porcentaje_iva"], str)
         self.assertIsInstance(esquema["porcentaje_total"], str)
         self.assertIsInstance(concepto["monto_material_sugerido"], str)
+
+
+@override_settings(DEBUG=False, CODEX_DEVICE_TOKEN="")
+class ChremataOperationsApiTests(TestCase):
+    def setUp(self):
+        self.device_token, self.token_completo = DeviceToken.crear("Zephyros")
+        self.url = reverse("api-v1-chremata-operations")
+        self.origen = OrigenIngreso.objects.create(nombre="Consultorio")
+        self.concepto = ConceptoIngreso.objects.create(nombre="Consulta")
+        self.concepto_material = ConceptoIngreso.objects.create(
+            nombre="Curación con material",
+            permite_material_adicional=True,
+        )
+
+    def post_operation(self, payload, token=None):
+        headers = {}
+        if token is not None:
+            headers["X-Codex-Device-Token"] = token
+        else:
+            headers["X-Codex-Device-Token"] = self.token_completo
+        return self.client.post(
+            self.url,
+            data=json.dumps(payload),
+            content_type="application/json",
+            headers=headers,
+        )
+
+    def payload_crear_ticket(self, **overrides):
+        ticket = {
+            "ticket_public_id": str(uuid4()),
+            "fecha": "2026-06-10T10:00:00Z",
+            "estado": "pendiente",
+            "nombre_referencia": "Referencia operativa",
+            "origen_ingreso_public_id": str(self.origen.public_id),
+            "notas": "Ticket offline",
+            "lineas": [
+                {
+                    "concepto_ingreso_public_id": str(self.concepto.public_id),
+                    "descripcion": "Consulta",
+                    "cantidad": "2.00",
+                    "monto_unitario": "80.00",
+                    "monto_total": "160.00",
+                    "monto_material_cobrado": "0.00",
+                    "orden": 1,
+                    "notas": "",
+                },
+            ],
+        }
+        payload = {
+            "operation": "crear_ticket",
+            "operation_contract": "chremata.operation.crear_ticket.v1",
+            "device_id": "zephyros-cardputer",
+            "device_entry_id": str(uuid4()),
+            "ticket": ticket,
+        }
+        for key, value in overrides.items():
+            if key == "ticket":
+                payload["ticket"].update(value)
+            else:
+                payload[key] = value
+        return payload
+
+    def test_post_con_token_valido_funciona(self):
+        response = self.post_operation(self.payload_crear_ticket())
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.json()["ok"])
+
+    def test_post_sin_token_responde_401(self):
+        response = self.client.post(
+            self.url,
+            data=json.dumps(self.payload_crear_ticket()),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 401)
+
+    def test_post_con_token_invalido_responde_401(self):
+        response = self.post_operation(self.payload_crear_ticket(), token="incorrecto")
+
+        self.assertEqual(response.status_code, 401)
+
+    def test_crear_ticket_exitoso_crea_ticket_y_linea(self):
+        payload = self.payload_crear_ticket()
+
+        response = self.post_operation(payload)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(Ticket.objects.count(), 1)
+        self.assertEqual(TicketLinea.objects.count(), 1)
+        ticket = Ticket.objects.get()
+        self.assertEqual(str(ticket.public_id), payload["ticket"]["ticket_public_id"])
+        self.assertEqual(ticket.estado, Ticket.ESTADO_PENDIENTE)
+        self.assertEqual(ticket.lineas.get().monto_total, Decimal("160.00"))
+
+    def test_crear_ticket_no_crea_ingreso_ni_ticket_pago(self):
+        self.post_operation(self.payload_crear_ticket())
+
+        self.assertEqual(Ingreso.objects.count(), 0)
+        self.assertEqual(TicketPago.objects.count(), 0)
+
+    def test_respuesta_exitosa_no_expone_ids_internos_y_montos_son_strings(self):
+        response = self.post_operation(self.payload_crear_ticket()).json()
+
+        self.assertNotIn("id", response["result"])
+        self.assertNotIn("ticket_id", response["result"])
+        self.assertEqual(response["result"]["monto_total"], "160.00")
+        self.assertEqual(response["result"]["monto_material_cobrado"], "0.00")
+        self.assertEqual(response["result"]["monto_total_cobrado"], "160.00")
+
+    def test_crear_ticket_con_material_calcula_totales(self):
+        payload = self.payload_crear_ticket(
+            ticket={
+                "lineas": [
+                    {
+                        "concepto_ingreso_public_id": str(
+                            self.concepto_material.public_id
+                        ),
+                        "descripcion": "Curación",
+                        "cantidad": "1.00",
+                        "monto_unitario": "160.00",
+                        "monto_total": "160.00",
+                        "monto_material_cobrado": "30.00",
+                        "orden": 1,
+                        "notas": "",
+                    },
+                ],
+            },
+        )
+
+        data = self.post_operation(payload).json()
+
+        self.assertEqual(data["result"]["monto_total"], "160.00")
+        self.assertEqual(data["result"]["monto_material_cobrado"], "30.00")
+        self.assertEqual(data["result"]["monto_total_cobrado"], "190.00")
+
+    def test_reenviar_misma_operacion_devuelve_duplicate_y_no_duplica_ticket(self):
+        payload = self.payload_crear_ticket()
+        primera = self.post_operation(payload)
+        segunda = self.post_operation(payload)
+
+        self.assertEqual(primera.status_code, 200)
+        self.assertEqual(segunda.status_code, 200)
+        self.assertFalse(primera.json()["duplicate"])
+        self.assertTrue(segunda.json()["duplicate"])
+        self.assertEqual(Ticket.objects.count(), 1)
+        self.assertEqual(TicketLinea.objects.count(), 1)
+
+    def test_reenviar_misma_llave_con_payload_distinto_devuelve_409(self):
+        payload = self.payload_crear_ticket()
+        self.post_operation(payload)
+        payload_distinto = self.payload_crear_ticket(
+            device_entry_id=payload["device_entry_id"],
+            ticket={"nombre_referencia": "Otra referencia"},
+        )
+
+        response = self.post_operation(payload_distinto)
+
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(response.json()["error"]["code"], "payload_conflict")
+        self.assertEqual(Ticket.objects.count(), 1)
+        self.assertEqual(Ticket.objects.get().nombre_referencia, "Referencia operativa")
+
+    def test_json_invalido_devuelve_400(self):
+        response = self.client.post(
+            self.url,
+            data="{no-json",
+            content_type="application/json",
+            headers={"X-Codex-Device-Token": self.token_completo},
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()["error"]["code"], "invalid_json")
+
+    def test_falta_device_entry_id_devuelve_400(self):
+        payload = self.payload_crear_ticket()
+        del payload["device_entry_id"]
+
+        response = self.post_operation(payload)
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(
+            response.json()["error"]["fields"]["device_entry_id"], "required"
+        )
+
+    def test_operation_desconocida_devuelve_400_y_se_registra_failed(self):
+        payload = self.payload_crear_ticket(operation="cobrar_ticket")
+
+        response = self.post_operation(payload)
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()["error"]["code"], "unsupported_operation")
+        self.assertEqual(
+            OperacionDispositivoChremata.objects.get().status,
+            OperacionDispositivoChremata.STATUS_FAILED,
+        )
+
+    def test_operation_contract_incorrecto_devuelve_400(self):
+        payload = self.payload_crear_ticket(operation_contract="contrato.incorrecto")
+
+        response = self.post_operation(payload)
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()["error"]["code"], "invalid_operation_contract")
+
+    def test_origen_inexistente_devuelve_422(self):
+        payload = self.payload_crear_ticket(
+            ticket={"origen_ingreso_public_id": str(uuid4())},
+        )
+
+        response = self.post_operation(payload)
+
+        self.assertEqual(response.status_code, 422)
+        self.assertEqual(response.json()["error"]["code"], "reference_not_found")
+        self.assertEqual(response.json()["error"]["field"], "origen_ingreso_public_id")
+
+    def test_concepto_inexistente_devuelve_422(self):
+        payload = self.payload_crear_ticket(
+            ticket={
+                "lineas": [
+                    {
+                        "concepto_ingreso_public_id": str(uuid4()),
+                        "descripcion": "Consulta",
+                        "cantidad": "1.00",
+                        "monto_unitario": "80.00",
+                        "monto_total": "80.00",
+                        "monto_material_cobrado": "0.00",
+                        "orden": 1,
+                        "notas": "",
+                    },
+                ],
+            },
+        )
+
+        response = self.post_operation(payload)
+
+        self.assertEqual(response.status_code, 422)
+        self.assertEqual(response.json()["error"]["code"], "reference_not_found")
+
+    def test_ticket_public_id_repetido_por_otra_operacion_falla(self):
+        ticket_public_id = uuid4()
+        Ticket.objects.create(
+            public_id=ticket_public_id,
+            fecha=datetime(2026, 6, 10, 10, tzinfo=datetime_timezone.utc),
+            estado=Ticket.ESTADO_PENDIENTE,
+            origen=self.origen,
+        )
+        payload = self.payload_crear_ticket(
+            ticket={"ticket_public_id": str(ticket_public_id)},
+        )
+
+        response = self.post_operation(payload)
+
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(response.json()["error"]["code"], "ticket_public_id_conflict")
+        self.assertEqual(Ticket.objects.count(), 1)
+
+    def test_estado_distinto_de_pendiente_falla(self):
+        payload = self.payload_crear_ticket(ticket={"estado": "cobrado"})
+
+        response = self.post_operation(payload)
+
+        self.assertEqual(response.status_code, 422)
+        self.assertEqual(
+            response.json()["error"]["fields"]["estado"],
+            ["crear_ticket solo acepta estado pendiente."],
+        )
+        self.assertEqual(Ticket.objects.count(), 0)
+
+    def test_lineas_vacias_falla(self):
+        payload = self.payload_crear_ticket(ticket={"lineas": []})
+
+        response = self.post_operation(payload)
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(
+            response.json()["error"]["fields"]["lineas"], "required_non_empty_list"
+        )
+
+    def test_monto_total_inconsistente_falla(self):
+        payload = self.payload_crear_ticket(
+            ticket={
+                "lineas": [
+                    {
+                        "concepto_ingreso_public_id": str(self.concepto.public_id),
+                        "descripcion": "Consulta",
+                        "cantidad": "2.00",
+                        "monto_unitario": "80.00",
+                        "monto_total": "100.00",
+                        "monto_material_cobrado": "0.00",
+                        "orden": 1,
+                        "notas": "",
+                    },
+                ],
+            },
+        )
+
+        response = self.post_operation(payload)
+
+        self.assertEqual(response.status_code, 422)
+        self.assertEqual(response.json()["error"]["code"], "line_total_mismatch")
+        self.assertEqual(Ticket.objects.count(), 0)
+
+    def test_material_invalido_falla_si_concepto_no_permite_material(self):
+        payload = self.payload_crear_ticket(
+            ticket={
+                "lineas": [
+                    {
+                        "concepto_ingreso_public_id": str(self.concepto.public_id),
+                        "descripcion": "Consulta",
+                        "cantidad": "1.00",
+                        "monto_unitario": "80.00",
+                        "monto_total": "80.00",
+                        "monto_material_cobrado": "10.00",
+                        "orden": 1,
+                        "notas": "",
+                    },
+                ],
+            },
+        )
+
+        response = self.post_operation(payload)
+
+        self.assertEqual(response.status_code, 422)
+        self.assertEqual(response.json()["error"]["code"], "business_validation_error")
+        self.assertEqual(Ticket.objects.count(), 0)
+
+    def test_rollback_si_una_linea_falla_no_deja_ticket_parcial(self):
+        payload = self.payload_crear_ticket(
+            ticket={
+                "lineas": [
+                    {
+                        "concepto_ingreso_public_id": str(
+                            self.concepto_material.public_id
+                        ),
+                        "descripcion": "Curación",
+                        "cantidad": "1.00",
+                        "monto_unitario": "80.00",
+                        "monto_total": "80.00",
+                        "monto_material_cobrado": "10.00",
+                        "orden": 1,
+                        "notas": "",
+                    },
+                    {
+                        "concepto_ingreso_public_id": str(self.concepto.public_id),
+                        "descripcion": "Consulta",
+                        "cantidad": "1.00",
+                        "monto_unitario": "80.00",
+                        "monto_total": "70.00",
+                        "monto_material_cobrado": "0.00",
+                        "orden": 2,
+                        "notas": "",
+                    },
+                ],
+            },
+        )
+
+        response = self.post_operation(payload)
+
+        self.assertEqual(response.status_code, 422)
+        self.assertEqual(Ticket.objects.count(), 0)
+        self.assertEqual(TicketLinea.objects.count(), 0)
+        self.assertEqual(
+            OperacionDispositivoChremata.objects.get().status,
+            OperacionDispositivoChremata.STATUS_FAILED,
+        )
+
+    def test_reenvio_de_operacion_fallida_devuelve_mismo_error(self):
+        payload = self.payload_crear_ticket(ticket={"lineas": []})
+
+        primera = self.post_operation(payload)
+        segunda = self.post_operation(payload)
+
+        self.assertEqual(primera.status_code, 400)
+        self.assertEqual(segunda.status_code, 422)
+        self.assertTrue(segunda.json()["duplicate"])
+        self.assertEqual(
+            segunda.json()["error"],
+            primera.json()["error"],
+        )
+        self.assertEqual(OperacionDispositivoChremata.objects.count(), 1)
 
 
 @override_settings(DEBUG=False, CODEX_DEVICE_TOKEN="")

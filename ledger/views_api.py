@@ -1,11 +1,13 @@
+import json
 from datetime import timezone as datetime_timezone
 from decimal import Decimal
 
 from django.db.models import Max, Prefetch, Sum
 from django.http import JsonResponse
 from django.utils import timezone
-from django.views.decorators.http import require_GET
+from django.views.decorators.http import require_GET, require_POST
 
+from .operations import OperationValidationError, procesar_operacion_chremata
 from .models import (
     CanalCobro,
     ConceptoIngreso,
@@ -505,6 +507,38 @@ def _material_pool_snapshot():
         "ultimo_gasto_material_fecha": ultimo_gasto_material_fecha,
         "ultimo_ingreso_con_material_fecha": ultimo_ingreso_con_material_fecha,
     }
+
+
+@require_POST
+def chremata_operations(request):
+    try:
+        payload = json.loads(request.body or b"{}")
+    except json.JSONDecodeError:
+        return JsonResponse(
+            {
+                "ok": False,
+                "status": "failed",
+                "error": {
+                    "code": "invalid_json",
+                    "message": "El cuerpo de la solicitud debe ser JSON válido.",
+                },
+            },
+            status=400,
+        )
+
+    try:
+        response, status_code = procesar_operacion_chremata(payload)
+    except OperationValidationError as exc:
+        return JsonResponse(
+            {
+                "ok": False,
+                "status": exc.operation_status,
+                "error": exc.to_error(),
+            },
+            status=exc.status_code,
+        )
+
+    return JsonResponse(response, status=status_code)
 
 
 @require_GET
