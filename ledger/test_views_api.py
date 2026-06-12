@@ -1473,6 +1473,452 @@ class ChremataOperationsApiTests(TestCase):
 
 
 @override_settings(DEBUG=False, CODEX_DEVICE_TOKEN="")
+class ChremataOperationsEndToEndTests(TestCase):
+    def setUp(self):
+        self.device_token, self.token_completo = DeviceToken.crear("Zephyros E2E")
+        self.catalogos_url = reverse("api-v1-catalogos")
+        self.schema_url = reverse("api-v1-chremata-schema")
+        self.material_pool_url = reverse("api-v1-chremata-material-pool")
+        self.operations_url = reverse("api-v1-chremata-operations")
+        self.headers = {"X-Codex-Device-Token": self.token_completo}
+        self.device_id = "zephyros-e2e"
+
+        self.origen = OrigenIngreso.objects.create(nombre="Consultorio E2E")
+        self.concepto_consulta = ConceptoIngreso.objects.create(nombre="Consulta E2E")
+        self.concepto_material = ConceptoIngreso.objects.create(
+            nombre="Procedimiento con material E2E",
+            permite_material_adicional=True,
+        )
+        self.metodo_pago = MetodoPago.objects.create(nombre="Tarjeta E2E")
+        self.canal_cobro = CanalCobro.objects.create(
+            nombre="Terminal E2E",
+            metodo_pago=self.metodo_pago,
+        )
+        self.esquema_comision = EsquemaComision.objects.create(
+            nombre="Sin comisión E2E",
+            porcentaje_base=Decimal("0.0000"),
+        )
+        self.esquema_comision.canales_cobro.add(self.canal_cobro)
+        self.canal_cobro.esquema_comision_predeterminado = self.esquema_comision
+        self.canal_cobro.save()
+        self.gasto_inicial = GastoMaterial.objects.create(
+            fecha=datetime(2026, 6, 10, 9, tzinfo=datetime_timezone.utc),
+            monto=Decimal("300.00"),
+            descripcion="Material inicial demo",
+        )
+
+    def get_api(self, url, token=None):
+        headers = self.headers if token is None else {"X-Codex-Device-Token": token}
+        return self.client.get(url, headers=headers)
+
+    def post_operation(self, payload, token=None):
+        headers = self.headers if token is None else {"X-Codex-Device-Token": token}
+        return self.client.post(
+            self.operations_url,
+            data=json.dumps(payload),
+            content_type="application/json",
+            headers=headers,
+        )
+
+    def assert_no_internal_ids(self, result):
+        for key in result:
+            self.assertNotEqual(key, "id")
+            if key.endswith("_id"):
+                self.assertTrue(key.endswith("_public_id"), key)
+            self.assertNotIn("ingreso_id", key)
+            self.assertNotIn("ticket_pago_id", key)
+
+    def crear_ticket_payload(self, *, device_entry_id, ticket_public_id, nombre):
+        return {
+            "operation": "crear_ticket",
+            "operation_contract": "chremata.operation.crear_ticket.v1",
+            "device_id": self.device_id,
+            "device_entry_id": device_entry_id,
+            "ticket": {
+                "ticket_public_id": str(ticket_public_id),
+                "fecha": "2026-06-11T10:00:00Z",
+                "estado": "pendiente",
+                "nombre_referencia": nombre,
+                "origen_ingreso_public_id": str(self.origen.public_id),
+                "notas": "Ticket demo offline",
+                "lineas": [
+                    {
+                        "concepto_ingreso_public_id": str(
+                            self.concepto_consulta.public_id
+                        ),
+                        "descripcion": "Consulta médica",
+                        "cantidad": "1.00",
+                        "monto_unitario": "60.00",
+                        "monto_total": "60.00",
+                        "monto_material_cobrado": "0.00",
+                        "orden": 1,
+                        "notas": "",
+                    },
+                    {
+                        "concepto_ingreso_public_id": str(
+                            self.concepto_material.public_id
+                        ),
+                        "descripcion": "Procedimiento con material",
+                        "cantidad": "1.00",
+                        "monto_unitario": "100.00",
+                        "monto_total": "100.00",
+                        "monto_material_cobrado": "40.00",
+                        "orden": 2,
+                        "notas": "",
+                    },
+                ],
+            },
+        }
+
+    def cobrar_ticket_payload(self, *, device_entry_id, ticket_public_id):
+        return {
+            "operation": "cobrar_ticket",
+            "operation_contract": "chremata.operation.cobrar_ticket.v1",
+            "device_id": self.device_id,
+            "device_entry_id": device_entry_id,
+            "ticket_public_id": str(ticket_public_id),
+            "fecha_cobro": "2026-06-11T12:00:00Z",
+            "canal_cobro_public_id": str(self.canal_cobro.public_id),
+            "esquema_comision_public_id": None,
+            "concepto_ingreso_resumen_public_id": str(self.concepto_material.public_id),
+            "notas": "Cobro demo",
+        }
+
+    def cancelar_ticket_payload(self, *, device_entry_id, ticket_public_id):
+        return {
+            "operation": "cancelar_ticket",
+            "operation_contract": "chremata.operation.cancelar_ticket.v1",
+            "device_id": self.device_id,
+            "device_entry_id": device_entry_id,
+            "ticket_public_id": str(ticket_public_id),
+            "fecha_cancelacion": "2026-06-11T13:00:00Z",
+            "notas": "Cancelación demo",
+        }
+
+    def abandonar_ticket_payload(self, *, device_entry_id, ticket_public_id):
+        return {
+            "operation": "abandonar_ticket",
+            "operation_contract": "chremata.operation.abandonar_ticket.v1",
+            "device_id": self.device_id,
+            "device_entry_id": device_entry_id,
+            "ticket_public_id": str(ticket_public_id),
+            "fecha_abandono": "2026-06-11T13:30:00Z",
+            "notas": "Abandono demo",
+        }
+
+    def crear_gasto_material_payload(self, *, device_entry_id):
+        return {
+            "operation": "crear_gasto_material",
+            "operation_contract": "chremata.operation.crear_gasto_material.v1",
+            "device_id": self.device_id,
+            "device_entry_id": device_entry_id,
+            "gasto_material": {
+                "fecha": "2026-06-11T14:00:00Z",
+                "monto": "120.00",
+                "descripcion": "Gasas demo",
+                "notas": "Compra demo",
+            },
+        }
+
+    def assert_material_pool(self, *, total_gastos, total_recuperado, pool_actual):
+        response = self.get_api(self.material_pool_url)
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertEqual(data["total_gastos_material"], total_gastos)
+        self.assertEqual(data["total_material_recuperado"], total_recuperado)
+        self.assertEqual(data["pool_material_actual"], pool_actual)
+        return data
+
+    def test_flujo_integral_operaciones_chremata(self):
+        schema = self.get_api(self.schema_url)
+        self.assertEqual(schema.status_code, 200)
+        schema_data = schema.json()
+        for operation in [
+            "crear_ticket",
+            "cobrar_ticket",
+            "cancelar_ticket",
+            "abandonar_ticket",
+            "crear_gasto_material",
+        ]:
+            self.assertIn(operation, schema_data["operations"])
+        self.assertIn("material_pool", schema_data)
+
+        catalogos = self.get_api(self.catalogos_url)
+        self.assertEqual(catalogos.status_code, 200)
+        catalogs = catalogos.json()["catalogs"]
+        self.assertIn(
+            str(self.origen.public_id),
+            {i["public_id"] for i in catalogs["origenes_ingreso"]},
+        )
+        self.assertIn(
+            str(self.concepto_consulta.public_id),
+            {i["public_id"] for i in catalogs["conceptos_ingreso"]},
+        )
+        self.assertIn(
+            str(self.concepto_material.public_id),
+            {i["public_id"] for i in catalogs["conceptos_ingreso"]},
+        )
+        self.assertIn(
+            str(self.canal_cobro.public_id),
+            {i["public_id"] for i in catalogs["canales_cobro"]},
+        )
+        self.assertIn(
+            str(self.esquema_comision.public_id),
+            {i["public_id"] for i in catalogs["esquemas_comision"]},
+        )
+
+        self.assert_material_pool(
+            total_gastos="300.00",
+            total_recuperado="0.00",
+            pool_actual="300.00",
+        )
+
+        ticket_public_id = uuid4()
+        crear_payload = self.crear_ticket_payload(
+            device_entry_id="entry-crear-ticket-1",
+            ticket_public_id=ticket_public_id,
+            nombre="Paciente Demo",
+        )
+        crear_response = self.post_operation(crear_payload)
+        self.assertEqual(crear_response.status_code, 200)
+        crear_data = crear_response.json()
+        self.assertTrue(crear_data["ok"])
+        self.assertEqual(crear_data["status"], "processed")
+        self.assertFalse(crear_data["duplicate"])
+        self.assert_no_internal_ids(crear_data["result"])
+        self.assertEqual(Ticket.objects.count(), 1)
+        self.assertEqual(TicketLinea.objects.count(), 2)
+        ticket = Ticket.objects.get(public_id=ticket_public_id)
+        self.assertEqual(ticket.estado, Ticket.ESTADO_PENDIENTE)
+        self.assertEqual(ticket.nombre_referencia, "Paciente Demo")
+        self.assertEqual(ticket.monto_total, Decimal("160.00"))
+        self.assertEqual(ticket.monto_material_cobrado, Decimal("40.00"))
+        self.assertEqual(Ingreso.objects.count(), 0)
+        self.assertEqual(TicketPago.objects.count(), 0)
+        self.assert_material_pool(
+            total_gastos="300.00",
+            total_recuperado="0.00",
+            pool_actual="300.00",
+        )
+
+        duplicate_crear = self.post_operation(crear_payload)
+        self.assertEqual(duplicate_crear.status_code, 200)
+        self.assertTrue(duplicate_crear.json()["duplicate"])
+        self.assertEqual(Ticket.objects.count(), 1)
+        self.assertEqual(TicketLinea.objects.count(), 2)
+
+        conflict_payload = self.crear_ticket_payload(
+            device_entry_id="entry-crear-ticket-1",
+            ticket_public_id=ticket_public_id,
+            nombre="Paciente Editado",
+        )
+        conflict_response = self.post_operation(conflict_payload)
+        self.assertEqual(conflict_response.status_code, 409)
+        self.assertEqual(conflict_response.json()["error"]["code"], "payload_conflict")
+        ticket.refresh_from_db()
+        self.assertEqual(ticket.nombre_referencia, "Paciente Demo")
+
+        cobrar_payload = self.cobrar_ticket_payload(
+            device_entry_id="entry-cobrar-ticket-1",
+            ticket_public_id=ticket_public_id,
+        )
+        cobrar_response = self.post_operation(cobrar_payload)
+        self.assertEqual(cobrar_response.status_code, 200)
+        cobrar_data = cobrar_response.json()
+        self.assertTrue(cobrar_data["ok"])
+        self.assertFalse(cobrar_data["duplicate"])
+        self.assert_no_internal_ids(cobrar_data["result"])
+        ticket.refresh_from_db()
+        self.assertEqual(ticket.estado, Ticket.ESTADO_COBRADO)
+        self.assertEqual(TicketPago.objects.count(), 1)
+        self.assertEqual(Ingreso.objects.count(), 1)
+        ingreso = Ingreso.objects.get()
+        pago = TicketPago.objects.get()
+        self.assertEqual(
+            ingreso.fecha, datetime(2026, 6, 11, 12, tzinfo=datetime_timezone.utc)
+        )
+        self.assertEqual(ingreso.monto_material_cobrado, Decimal("40.00"))
+        self.assertEqual(ingreso.material_recuperado, Decimal("40.00"))
+        self.assertEqual(ingreso.pool_material_antes, Decimal("300.00"))
+        self.assertEqual(ingreso.pool_material_despues, Decimal("260.00"))
+        self.assertEqual(cobrar_data["result"]["pool_material_antes"], "300.00")
+        self.assertEqual(cobrar_data["result"]["pool_material_despues"], "260.00")
+
+        self.assert_material_pool(
+            total_gastos="300.00",
+            total_recuperado="40.00",
+            pool_actual="260.00",
+        )
+
+        duplicate_cobrar = self.post_operation(cobrar_payload)
+        self.assertEqual(duplicate_cobrar.status_code, 200)
+        self.assertTrue(duplicate_cobrar.json()["duplicate"])
+        self.assertEqual(Ingreso.objects.count(), 1)
+        self.assertEqual(TicketPago.objects.count(), 1)
+        self.assert_material_pool(
+            total_gastos="300.00",
+            total_recuperado="40.00",
+            pool_actual="260.00",
+        )
+
+        abandonado_public_id = uuid4()
+        crear_abandonado = self.crear_ticket_payload(
+            device_entry_id="entry-crear-abandonado",
+            ticket_public_id=abandonado_public_id,
+            nombre="Paciente Abandono",
+        )
+        self.assertEqual(self.post_operation(crear_abandonado).status_code, 200)
+        abandono_payload = self.abandonar_ticket_payload(
+            device_entry_id="entry-abandonar-ticket",
+            ticket_public_id=abandonado_public_id,
+        )
+        abandono_response = self.post_operation(abandono_payload)
+        self.assertEqual(abandono_response.status_code, 200)
+        abandono_ticket = Ticket.objects.get(public_id=abandonado_public_id)
+        self.assertEqual(abandono_ticket.estado, Ticket.ESTADO_ABANDONADO)
+        self.assertEqual(abandono_ticket.nombre_referencia, "Paciente Abandono")
+        self.assertEqual(abandono_ticket.lineas.count(), 2)
+        self.assertEqual(abandono_ticket.monto_total, Decimal("160.00"))
+        self.assert_no_internal_ids(abandono_response.json()["result"])
+        self.assertEqual(Ingreso.objects.count(), 1)
+        self.assertEqual(TicketPago.objects.count(), 1)
+        self.assert_material_pool(
+            total_gastos="300.00",
+            total_recuperado="40.00",
+            pool_actual="260.00",
+        )
+
+        cancelado_public_id = uuid4()
+        crear_cancelado = self.crear_ticket_payload(
+            device_entry_id="entry-crear-cancelado",
+            ticket_public_id=cancelado_public_id,
+            nombre="Paciente Cancelación",
+        )
+        self.assertEqual(self.post_operation(crear_cancelado).status_code, 200)
+        cancelacion_payload = self.cancelar_ticket_payload(
+            device_entry_id="entry-cancelar-ticket",
+            ticket_public_id=cancelado_public_id,
+        )
+        cancelacion_response = self.post_operation(cancelacion_payload)
+        self.assertEqual(cancelacion_response.status_code, 200)
+        cancelado_ticket = Ticket.objects.get(public_id=cancelado_public_id)
+        self.assertEqual(cancelado_ticket.estado, Ticket.ESTADO_CANCELADO)
+        self.assertEqual(cancelado_ticket.lineas.count(), 2)
+        self.assertEqual(cancelado_ticket.monto_total, Decimal("160.00"))
+        self.assert_no_internal_ids(cancelacion_response.json()["result"])
+        self.assertEqual(Ingreso.objects.count(), 1)
+        self.assertEqual(TicketPago.objects.count(), 1)
+        self.assert_material_pool(
+            total_gastos="300.00",
+            total_recuperado="40.00",
+            pool_actual="260.00",
+        )
+
+        gasto_payload = self.crear_gasto_material_payload(
+            device_entry_id="entry-gasto-1"
+        )
+        gasto_response = self.post_operation(gasto_payload)
+        self.assertEqual(gasto_response.status_code, 200)
+        gasto_result = gasto_response.json()["result"]
+        self.assert_no_internal_ids(gasto_result)
+        self.assertEqual(gasto_result["fecha"], "2026-06-11T14:00:00Z")
+        self.assertEqual(gasto_result["monto"], "120.00")
+        self.assertEqual(gasto_result["descripcion"], "Gasas demo")
+        self.assertEqual(GastoMaterial.objects.count(), 2)
+        gasto_creado = GastoMaterial.objects.get(descripcion="Gasas demo")
+        self.assertEqual(gasto_creado.monto, Decimal("120.00"))
+        self.assertEqual(gasto_creado.notas, "Compra demo")
+        self.assertEqual(Ticket.objects.count(), 3)
+        self.assertEqual(TicketLinea.objects.count(), 6)
+        self.assertEqual(TicketPago.objects.count(), 1)
+        self.assertEqual(Ingreso.objects.count(), 1)
+
+        self.assert_material_pool(
+            total_gastos="420.00",
+            total_recuperado="40.00",
+            pool_actual="380.00",
+        )
+
+        operaciones = OperacionDispositivoChremata.objects.order_by("device_entry_id")
+        self.assertEqual(operaciones.count(), 7)
+        for operacion in operaciones:
+            self.assertEqual(
+                operacion.status, OperacionDispositivoChremata.STATUS_PROCESSED
+            )
+            self.assertIsNotNone(operacion.response)
+        self.assertEqual(
+            OperacionDispositivoChremata.objects.get(
+                device_entry_id="entry-crear-ticket-1"
+            ).ticket,
+            ticket,
+        )
+        operacion_cobro = OperacionDispositivoChremata.objects.get(
+            device_entry_id="entry-cobrar-ticket-1"
+        )
+        self.assertEqual(operacion_cobro.ticket, ticket)
+        self.assertEqual(operacion_cobro.ingreso, ingreso)
+        self.assertEqual(operacion_cobro.ticket_pago, pago)
+        self.assertEqual(
+            OperacionDispositivoChremata.objects.get(
+                device_entry_id="entry-abandonar-ticket"
+            ).ticket,
+            abandono_ticket,
+        )
+        self.assertEqual(
+            OperacionDispositivoChremata.objects.get(
+                device_entry_id="entry-cancelar-ticket"
+            ).ticket,
+            cancelado_ticket,
+        )
+        self.assertEqual(
+            OperacionDispositivoChremata.objects.get(
+                device_entry_id="entry-gasto-1"
+            ).gasto_material,
+            gasto_creado,
+        )
+
+        invalid_payload = self.crear_gasto_material_payload(
+            device_entry_id="entry-gasto-fallido"
+        )
+        invalid_payload["gasto_material"]["monto"] = "0.00"
+        invalid_response = self.post_operation(invalid_payload)
+        self.assertEqual(invalid_response.status_code, 422)
+        failed_operation = OperacionDispositivoChremata.objects.get(
+            device_entry_id="entry-gasto-fallido"
+        )
+        self.assertEqual(
+            failed_operation.status, OperacionDispositivoChremata.STATUS_FAILED
+        )
+        self.assertIsNotNone(failed_operation.error)
+        self.assertIsNotNone(failed_operation.response)
+
+    def test_seguridad_endpoints_api_requieren_token(self):
+        for url in [self.catalogos_url, self.schema_url, self.material_pool_url]:
+            with self.subTest(url=url):
+                self.assertEqual(self.client.get(url).status_code, 401)
+
+        response = self.client.post(
+            self.operations_url,
+            data=json.dumps(
+                self.crear_gasto_material_payload(device_entry_id="sin-token")
+            ),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 401)
+
+        response = self.post_operation(
+            self.crear_gasto_material_payload(device_entry_id="token-invalido"),
+            token="token-invalido",
+        )
+        self.assertEqual(response.status_code, 401)
+
+        response = self.post_operation(
+            self.crear_gasto_material_payload(device_entry_id="token-valido")
+        )
+        self.assertEqual(response.status_code, 200)
+
+
+@override_settings(DEBUG=False, CODEX_DEVICE_TOKEN="")
 class MaterialPoolApiTests(TestCase):
     def setUp(self):
         self.device_token, self.token_completo = DeviceToken.crear("Zephyros")
