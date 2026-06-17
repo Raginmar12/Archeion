@@ -32,7 +32,7 @@ ajuste, recálculo o reverso contable.
 ## Precios sugeridos de conceptos
 
 `ConceptoIngreso` todavía no tiene un campo dedicado para precio sugerido. El comando
-`seed_chremata_catalogs` carga el catálogo inicial real de conceptos y documenta el
-precio sugerido en la descripción de cada concepto para que Zephyros lo use como guía.
-El monto oficial se captura en Zephyros en la línea del ticket y Archeion lo consolida
-al recibir la operación correspondiente.
+`seed_chremata_catalogs` solo se ejecuta sobre una base limpia, carga los catálogos
+iniciales de Chremata y documenta el precio sugerido en la descripción de cada concepto
+para que Zephyros lo use como guía. El monto oficial se captura en Zephyros en la línea
+del ticket y Archeion lo consolida al recibir la operación correspondiente.
