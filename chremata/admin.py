@@ -7,6 +7,7 @@ from .models import (
     ConceptoIngreso,
     EsquemaComision,
     GastoMaterial,
+    OperacionDispositivoChremata,
     Ingreso,
     MetodoPago,
     OrigenIngreso,
@@ -112,9 +113,9 @@ class OrigenIngresoAdmin(admin.ModelAdmin):
 
 @admin.register(GastoMaterial)
 class GastoMaterialAdmin(admin.ModelAdmin):
-    list_display = ("fecha", "monto", "descripcion")
+    list_display = ("fecha", "monto", "descripcion", "caja_sesion")
     search_fields = ("descripcion", "notas")
-    list_filter = ("fecha",)
+    list_filter = ("fecha", "caja_sesion")
     date_hierarchy = "fecha"
 
 
@@ -134,6 +135,7 @@ class IngresoAdmin(admin.ModelAdmin):
         "canal_cobro",
         "esquema_comision",
         "origen",
+        "caja_sesion",
     )
     search_fields = (
         "notas",
@@ -150,6 +152,7 @@ class IngresoAdmin(admin.ModelAdmin):
         "canal_cobro__metodo_pago",
         "esquema_comision",
         "origen",
+        "caja_sesion",
         "fecha",
         "comision_manual",
     )
@@ -225,6 +228,7 @@ class TicketPagoAdmin(admin.ModelAdmin):
         "canal_cobro",
         "esquema_comision",
         "concepto_ingreso",
+        "caja_sesion",
         "creado_en",
     )
     search_fields = (
@@ -233,5 +237,31 @@ class TicketPagoAdmin(admin.ModelAdmin):
         "ticket__nombre_referencia",
         "ingreso__id",
     )
-    list_filter = ("canal_cobro", "esquema_comision", "concepto_ingreso", "fecha")
+    list_filter = (
+        "canal_cobro",
+        "esquema_comision",
+        "concepto_ingreso",
+        "caja_sesion",
+        "fecha",
+    )
     date_hierarchy = "fecha"
+
+
+@admin.register(OperacionDispositivoChremata)
+class OperacionDispositivoChremataAdmin(admin.ModelAdmin):
+    readonly_fields = ("recibido_en", "procesado_en", "actualizado_en")
+    list_display = (
+        "device_id",
+        "device_entry_id",
+        "operation",
+        "status",
+        "caja_sesion",
+        "ticket",
+        "ingreso",
+        "ticket_pago",
+        "gasto_material",
+        "recibido_en",
+    )
+    search_fields = ("device_id", "device_entry_id", "operation")
+    list_filter = ("operation", "status", "caja_sesion", "recibido_en")
+    date_hierarchy = "recibido_en"

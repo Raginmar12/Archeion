@@ -303,6 +303,13 @@ class OrigenIngreso(models.Model):
 
 
 class GastoMaterial(models.Model):
+    caja_sesion = models.ForeignKey(
+        CajaSesion,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="gastos_material",
+    )
     fecha = models.DateTimeField()
     monto = models.DecimalField(max_digits=10, decimal_places=2)
     descripcion = models.CharField(max_length=200, blank=True)
@@ -524,6 +531,14 @@ class Ingreso(models.Model):
     origen = models.ForeignKey(
         OrigenIngreso,
         on_delete=models.PROTECT,
+        related_name="ingresos",
+    )
+
+    caja_sesion = models.ForeignKey(
+        CajaSesion,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
         related_name="ingresos",
     )
 
@@ -846,6 +861,13 @@ class TicketPago(models.Model):
         on_delete=models.PROTECT,
         related_name="ticket_pagos",
     )
+    caja_sesion = models.ForeignKey(
+        CajaSesion,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="pagos",
+    )
     notas = models.TextField(blank=True)
     creado_en = models.DateTimeField(auto_now_add=True)
     actualizado_en = models.DateTimeField(auto_now=True)
@@ -910,6 +932,13 @@ class OperacionDispositivoChremata(models.Model):
     )
     gasto_material = models.ForeignKey(
         GastoMaterial,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="operaciones_dispositivo",
+    )
+    caja_sesion = models.ForeignKey(
+        CajaSesion,
         on_delete=models.PROTECT,
         null=True,
         blank=True,

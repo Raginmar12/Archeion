@@ -11,6 +11,7 @@ def cobrar_ticket(
     canal_cobro,
     concepto_ingreso,
     esquema_comision=None,
+    caja_sesion=None,
     notas="",
 ):
     """Cobra un ticket pendiente generando un TicketPago y un Ingreso oficial."""
@@ -64,6 +65,7 @@ def cobrar_ticket(
             canal_cobro=canal_cobro,
             esquema_comision=esquema_comision,
             origen=ticket_bloqueado.origen,
+            caja_sesion=caja_sesion,
             notas=notas_ingreso,
         )
 
@@ -74,6 +76,7 @@ def cobrar_ticket(
             canal_cobro=canal_cobro,
             esquema_comision=ingreso.esquema_comision,
             concepto_ingreso=concepto_ingreso,
+            caja_sesion=caja_sesion,
             notas=notas,
         )
 

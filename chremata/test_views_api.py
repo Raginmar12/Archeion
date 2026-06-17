@@ -387,6 +387,21 @@ class ChremataOperationsApiTests(TestCase):
         ticket.refresh_from_db()
         return ticket
 
+    def crear_caja_sesion_abierta(self, *, device_id="zephyros-cardputer"):
+        return CajaSesion.objects.create(
+            device_id=device_id,
+            abierta_en=datetime(2026, 6, 18, 4, 30, tzinfo=datetime_timezone.utc),
+            saldo_inicial_efectivo=Decimal("500.00"),
+        )
+
+    def crear_caja_sesion_cerrada(self, *, device_id="zephyros-cardputer"):
+        return CajaSesion.objects.create(
+            device_id=device_id,
+            estado=CajaSesion.ESTADO_CERRADA,
+            abierta_en=datetime(2026, 6, 18, 4, 30, tzinfo=datetime_timezone.utc),
+            cerrada_en=datetime(2026, 6, 18, 7, 15, tzinfo=datetime_timezone.utc),
+        )
+
     def payload_abrir_caja(self, **overrides):
         payload = {
             "operation": "abrir_caja",
@@ -1060,6 +1075,103 @@ class ChremataOperationsApiTests(TestCase):
         self.assertEqual(operacion.ingreso, Ingreso.objects.get())
         self.assertEqual(operacion.ticket_pago, TicketPago.objects.get())
 
+    def test_cobrar_ticket_sin_caja_public_id_sigue_funcionando(self):
+        ticket = self.crear_ticket_para_cobrar()
+
+        response = self.post_operation(self.payload_cobrar_ticket(ticket))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIsNone(TicketPago.objects.get().caja_sesion)
+        self.assertIsNone(Ingreso.objects.get().caja_sesion)
+        self.assertIsNone(OperacionDispositivoChremata.objects.get().caja_sesion)
+
+    def test_cobrar_ticket_con_caja_public_id_asocia_pago_ingreso_y_operacion(self):
+        caja = self.crear_caja_sesion_abierta()
+        ticket = self.crear_ticket_para_cobrar()
+        payload = self.payload_cobrar_ticket(ticket, caja_public_id=str(caja.public_id))
+
+        response = self.post_operation(payload)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(TicketPago.objects.get().caja_sesion, caja)
+        self.assertEqual(Ingreso.objects.get().caja_sesion, caja)
+        self.assertEqual(OperacionDispositivoChremata.objects.get().caja_sesion, caja)
+
+    def test_cobrar_ticket_falla_si_caja_public_id_no_existe(self):
+        ticket = self.crear_ticket_para_cobrar()
+        payload = self.payload_cobrar_ticket(ticket, caja_public_id=str(uuid4()))
+
+        response = self.post_operation(payload)
+
+        self.assertEqual(response.status_code, 422)
+        self.assertEqual(response.json()["error"]["code"], "missing_dependency")
+        self.assertEqual(TicketPago.objects.count(), 0)
+        self.assertEqual(Ingreso.objects.count(), 0)
+
+    def test_cobrar_ticket_falla_si_caja_public_id_esta_cerrada(self):
+        caja = self.crear_caja_sesion_cerrada()
+        ticket = self.crear_ticket_para_cobrar()
+        payload = self.payload_cobrar_ticket(ticket, caja_public_id=str(caja.public_id))
+
+        response = self.post_operation(payload)
+
+        self.assertEqual(response.status_code, 422)
+        self.assertEqual(response.json()["error"]["code"], "business_validation_error")
+        self.assertEqual(TicketPago.objects.count(), 0)
+        self.assertEqual(Ingreso.objects.count(), 0)
+
+    def test_cobrar_ticket_falla_si_caja_public_id_es_de_otro_device(self):
+        caja = self.crear_caja_sesion_abierta(device_id="otro-device")
+        ticket = self.crear_ticket_para_cobrar()
+        payload = self.payload_cobrar_ticket(ticket, caja_public_id=str(caja.public_id))
+
+        response = self.post_operation(payload)
+
+        self.assertEqual(response.status_code, 422)
+        self.assertEqual(response.json()["error"]["code"], "business_validation_error")
+        self.assertEqual(TicketPago.objects.count(), 0)
+        self.assertEqual(Ingreso.objects.count(), 0)
+
+    def test_cobrar_ticket_falla_si_caja_public_id_tiene_formato_invalido(self):
+        ticket = self.crear_ticket_para_cobrar()
+        payload = self.payload_cobrar_ticket(ticket, caja_public_id="no-es-uuid")
+
+        response = self.post_operation(payload)
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()["error"]["code"], "invalid_payload")
+        self.assertEqual(TicketPago.objects.count(), 0)
+        self.assertEqual(Ingreso.objects.count(), 0)
+
+    def test_cobrar_ticket_con_caja_es_idempotente(self):
+        caja = self.crear_caja_sesion_abierta()
+        ticket = self.crear_ticket_para_cobrar()
+        payload = self.payload_cobrar_ticket(ticket, caja_public_id=str(caja.public_id))
+
+        primera = self.post_operation(payload)
+        segunda = self.post_operation(payload)
+
+        self.assertEqual(primera.status_code, 200)
+        self.assertEqual(segunda.status_code, 200)
+        self.assertFalse(primera.json()["duplicate"])
+        self.assertTrue(segunda.json()["duplicate"])
+        self.assertEqual(TicketPago.objects.count(), 1)
+        self.assertEqual(OperacionDispositivoChremata.objects.get().caja_sesion, caja)
+
+    def test_cobrar_ticket_con_caja_misma_llave_payload_distinto_devuelve_409(self):
+        caja = self.crear_caja_sesion_abierta()
+        ticket = self.crear_ticket_para_cobrar()
+        payload = self.payload_cobrar_ticket(ticket, caja_public_id=str(caja.public_id))
+        payload_distinto = dict(payload)
+        payload_distinto["caja_public_id"] = str(uuid4())
+
+        primera = self.post_operation(payload)
+        segunda = self.post_operation(payload_distinto)
+
+        self.assertEqual(primera.status_code, 200)
+        self.assertEqual(segunda.status_code, 409)
+        self.assertEqual(segunda.json()["error"]["code"], "payload_conflict")
+
     def test_cobrar_ticket_respuesta_publica_incluye_snapshots_sin_ids_internos(self):
         GastoMaterial.objects.create(
             fecha=datetime(2026, 6, 10, 8, tzinfo=datetime_timezone.utc),
@@ -1602,6 +1714,88 @@ class ChremataOperationsApiTests(TestCase):
         self.assertIsNone(operacion.ticket)
         self.assertIsNone(operacion.ingreso)
         self.assertIsNone(operacion.ticket_pago)
+
+    def test_crear_gasto_material_sin_caja_public_id_sigue_funcionando(self):
+        response = self.post_operation(self.payload_crear_gasto_material())
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIsNone(GastoMaterial.objects.get().caja_sesion)
+        self.assertIsNone(OperacionDispositivoChremata.objects.get().caja_sesion)
+
+    def test_crear_gasto_material_con_caja_public_id_asocia_gasto_y_operacion(self):
+        caja = self.crear_caja_sesion_abierta()
+        payload = self.payload_crear_gasto_material(caja_public_id=str(caja.public_id))
+
+        response = self.post_operation(payload)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(GastoMaterial.objects.get().caja_sesion, caja)
+        self.assertEqual(OperacionDispositivoChremata.objects.get().caja_sesion, caja)
+
+    def test_crear_gasto_material_falla_si_caja_public_id_no_existe(self):
+        payload = self.payload_crear_gasto_material(caja_public_id=str(uuid4()))
+
+        response = self.post_operation(payload)
+
+        self.assertEqual(response.status_code, 422)
+        self.assertEqual(response.json()["error"]["code"], "missing_dependency")
+        self.assertEqual(GastoMaterial.objects.count(), 0)
+
+    def test_crear_gasto_material_falla_si_caja_public_id_esta_cerrada(self):
+        caja = self.crear_caja_sesion_cerrada()
+        payload = self.payload_crear_gasto_material(caja_public_id=str(caja.public_id))
+
+        response = self.post_operation(payload)
+
+        self.assertEqual(response.status_code, 422)
+        self.assertEqual(response.json()["error"]["code"], "business_validation_error")
+        self.assertEqual(GastoMaterial.objects.count(), 0)
+
+    def test_crear_gasto_material_falla_si_caja_public_id_es_de_otro_device(self):
+        caja = self.crear_caja_sesion_abierta(device_id="otro-device")
+        payload = self.payload_crear_gasto_material(caja_public_id=str(caja.public_id))
+
+        response = self.post_operation(payload)
+
+        self.assertEqual(response.status_code, 422)
+        self.assertEqual(response.json()["error"]["code"], "business_validation_error")
+        self.assertEqual(GastoMaterial.objects.count(), 0)
+
+    def test_crear_gasto_material_con_caja_no_cambia_material_pool(self):
+        caja = self.crear_caja_sesion_abierta()
+
+        response = self.post_operation(
+            self.payload_crear_gasto_material(caja_public_id=str(caja.public_id))
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(Ingreso.calcular_pool_material_actual(), Decimal("120.00"))
+
+    def test_crear_gasto_material_con_caja_es_idempotente(self):
+        caja = self.crear_caja_sesion_abierta()
+        payload = self.payload_crear_gasto_material(caja_public_id=str(caja.public_id))
+
+        primera = self.post_operation(payload)
+        segunda = self.post_operation(payload)
+
+        self.assertEqual(primera.status_code, 200)
+        self.assertEqual(segunda.status_code, 200)
+        self.assertTrue(segunda.json()["duplicate"])
+        self.assertEqual(GastoMaterial.objects.count(), 1)
+        self.assertEqual(OperacionDispositivoChremata.objects.get().caja_sesion, caja)
+
+    def test_crear_gasto_material_con_caja_misma_llave_payload_distinto_devuelve_409(self):
+        caja = self.crear_caja_sesion_abierta()
+        payload = self.payload_crear_gasto_material(caja_public_id=str(caja.public_id))
+        payload_distinto = dict(payload)
+        payload_distinto["caja_public_id"] = str(uuid4())
+
+        primera = self.post_operation(payload)
+        segunda = self.post_operation(payload_distinto)
+
+        self.assertEqual(primera.status_code, 200)
+        self.assertEqual(segunda.status_code, 409)
+        self.assertEqual(segunda.json()["error"]["code"], "payload_conflict")
 
     def test_crear_gasto_material_respuesta_publica(self):
         response = self.post_operation(self.payload_crear_gasto_material()).json()
@@ -2770,6 +2964,7 @@ class ChremataSchemaApiTests(TestCase):
         self.assertIn("canal_cobro_public_id", fields)
         self.assertIn("esquema_comision_public_id", fields)
         self.assertIn("concepto_ingreso_resumen_public_id", fields)
+        self.assertIn("caja_public_id", fields)
         self.assertEqual(
             fields["canal_cobro_public_id"]["relation"],
             "canales_cobro.public_id",
@@ -2783,6 +2978,13 @@ class ChremataSchemaApiTests(TestCase):
         self.assertEqual(
             fields["concepto_ingreso_resumen_public_id"]["relation"],
             "conceptos_ingreso.public_id",
+        )
+        self.assertEqual(fields["caja_public_id"]["relation"], "caja_sesion.public_id")
+        self.assertFalse(fields["caja_public_id"]["required"])
+        self.assertTrue(fields["caja_public_id"]["nullable"])
+        self.assertEqual(
+            fields["caja_public_id"]["compatibility"],
+            "optional_temporarily",
         )
         self.assertEqual(fields["fecha_cobro"]["type"], "datetime_utc_string")
         self.assertTrue(
@@ -2956,8 +3158,14 @@ class ChremataSchemaApiTests(TestCase):
             self.operation_payload_field_names(
                 self.get_schema().json(), "crear_gasto_material"
             ),
-            {"fecha", "monto", "descripcion", "notas"},
+            {"fecha", "monto", "caja_public_id", "descripcion", "notas"},
         )
+        gasto_fields = self.operation_payload_fields_by_name(
+            self.get_schema().json(), "crear_gasto_material"
+        )
+        self.assertEqual(gasto_fields["caja_public_id"]["relation"], "caja_sesion.public_id")
+        self.assertFalse(gasto_fields["caja_public_id"]["required"])
+        self.assertTrue(gasto_fields["caja_public_id"]["nullable"])
 
     def test_declara_autoridad_del_servidor_para_operaciones(self):
         operations = self.get_schema().json()["operations"]

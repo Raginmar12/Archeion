@@ -273,6 +273,52 @@ def _validar_operacion_soportada(payload):
         )
 
 
+def parse_caja_public_id(value):
+    try:
+        return UUID(str(value))
+    except (TypeError, ValueError, AttributeError) as exc:
+        raise OperationValidationError(
+            "invalid_payload",
+            "caja_public_id debe ser un UUID válido.",
+            fields={"caja_public_id": "invalid_uuid"},
+            status_code=400,
+        ) from exc
+
+
+def _obtener_caja_sesion_operacion(payload):
+    if payload.get("caja_public_id") is None:
+        return None
+
+    caja_public_id = parse_caja_public_id(payload["caja_public_id"])
+    try:
+        caja = CajaSesion.objects.get(public_id=caja_public_id)
+    except CajaSesion.DoesNotExist as exc:
+        raise OperationValidationError(
+            "missing_dependency",
+            "No existe una sesión de caja con ese caja_public_id.",
+            field="caja_public_id",
+            status_code=422,
+        ) from exc
+
+    if caja.estado != CajaSesion.ESTADO_ABIERTA:
+        raise OperationValidationError(
+            "business_validation_error",
+            "La sesión de caja debe estar abierta.",
+            fields={"caja_public_id": ["La sesión de caja debe estar abierta."]},
+            status_code=422,
+        )
+
+    if caja.device_id != payload["device_id"]:
+        raise OperationValidationError(
+            "business_validation_error",
+            "La sesión de caja pertenece a otro dispositivo.",
+            fields={"caja_public_id": ["La caja pertenece a otro dispositivo."]},
+            status_code=422,
+        )
+
+    return caja
+
+
 def _validar_money_no_negativo(valor, campo):
     monto = parse_money_string(valor, campo)
     if monto < Decimal("0.00"):
@@ -738,13 +784,15 @@ def _handle_crear_gasto_material(payload):
             status_code=400,
         )
 
+    caja_sesion = _obtener_caja_sesion_operacion(payload)
     gasto = GastoMaterial.objects.create(
+        caja_sesion=caja_sesion,
         fecha=fecha,
         monto=monto,
         descripcion=descripcion,
         notas=notas,
     )
-    return gasto, {
+    return gasto, caja_sesion, {
         "fecha": _datetime_utc_string(gasto.fecha),
         "monto": _decimal_money_string(gasto.monto),
         "descripcion": gasto.descripcion,
@@ -838,6 +886,7 @@ def _handle_cobrar_ticket(payload):
             status_code=400,
         )
 
+    caja_sesion = _obtener_caja_sesion_operacion(payload)
     ticket = get_by_public_id(Ticket, ticket_public_id, "ticket_public_id")
     canal_cobro = get_by_public_id(CanalCobro, canal_public_id, "canal_cobro_public_id")
     concepto_ingreso = get_by_public_id(
@@ -853,6 +902,7 @@ def _handle_cobrar_ticket(payload):
             canal_cobro=canal_cobro,
             concepto_ingreso=concepto_ingreso,
             esquema_comision=esquema_comision,
+            caja_sesion=caja_sesion,
             notas=notas,
         )
     except ValidationError as exc:
@@ -866,6 +916,7 @@ def _handle_cobrar_ticket(payload):
         ticket,
         ingreso,
         pago,
+        caja_sesion,
         {
             "ticket_public_id": str(ticket.public_id),
             "ticket_estado": ticket.estado,
@@ -893,13 +944,14 @@ def _handle_cobrar_ticket(payload):
 def _procesar_payload_nuevo(payload):
     _validar_operacion_soportada(payload)
     gasto_material = None
+    caja_sesion = None
     if payload["operation"] == ABRIR_CAJA:
-        _caja, result = _handle_abrir_caja(payload)
+        caja_sesion, result = _handle_abrir_caja(payload)
         ticket = None
         ingreso = None
         pago = None
     elif payload["operation"] == CERRAR_CAJA:
-        _caja, result = _handle_cerrar_caja(payload)
+        caja_sesion, result = _handle_cerrar_caja(payload)
         ticket = None
         ingreso = None
         pago = None
@@ -908,7 +960,7 @@ def _procesar_payload_nuevo(payload):
         ingreso = None
         pago = None
     elif payload["operation"] == COBRAR_TICKET:
-        ticket, ingreso, pago, result = _handle_cobrar_ticket(payload)
+        ticket, ingreso, pago, caja_sesion, result = _handle_cobrar_ticket(payload)
     elif payload["operation"] == CANCELAR_TICKET:
         ticket, ingreso, pago, result = _handle_cerrar_ticket_operativo(
             payload,
@@ -924,7 +976,7 @@ def _procesar_payload_nuevo(payload):
             campo_fecha="fecha_abandono",
         )
     else:
-        gasto_material, result = _handle_crear_gasto_material(payload)
+        gasto_material, caja_sesion, result = _handle_crear_gasto_material(payload)
         ticket = None
         ingreso = None
         pago = None
@@ -933,7 +985,7 @@ def _procesar_payload_nuevo(payload):
         OperacionDispositivoChremata.STATUS_PROCESSED,
         result=result,
     )
-    return ticket, ingreso, pago, gasto_material, response
+    return ticket, ingreso, pago, gasto_material, caja_sesion, response
 
 
 def _respuesta_error(payload, exc, *, duplicate=False):
@@ -994,7 +1046,7 @@ def procesar_operacion_chremata(payload):
 
         try:
             with transaction.atomic():
-                ticket, ingreso, pago, gasto_material, response = (
+                ticket, ingreso, pago, gasto_material, caja_sesion, response = (
                     _procesar_payload_nuevo(payload)
                 )
         except OperationValidationError as exc:
@@ -1020,6 +1072,7 @@ def procesar_operacion_chremata(payload):
         operacion.ingreso = ingreso
         operacion.ticket_pago = pago
         operacion.gasto_material = gasto_material
+        operacion.caja_sesion = caja_sesion
         operacion.procesado_en = timezone.now()
         operacion.save(
             update_fields=[
@@ -1029,6 +1082,7 @@ def procesar_operacion_chremata(payload):
                 "ingreso",
                 "ticket_pago",
                 "gasto_material",
+                "caja_sesion",
                 "procesado_en",
                 "actualizado_en",
             ],
