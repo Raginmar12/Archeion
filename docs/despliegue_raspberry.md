@@ -105,3 +105,10 @@ Pendiente de formalizar:
 - Preferir red local confiable.
 - Para acceso remoto futuro, usar VPN privada como Tailscale o WireGuard.
 - Rotar token si se sospecha exposición.
+
+
+## Operación diaria en Raspberry
+
+Cuando Archeion corra en Raspberry, el flujo operativo no cambia: Zephyros abre caja antes de cobrar, sincroniza operaciones, cierra caja al final y consulta el corte oficial en Archeion con `GET /api/v1/chremata/cajas/<caja_public_id>/corte/`.
+
+La Raspberry hospeda la autoridad de datos; el corte local de Zephyros sigue siendo auxiliar. Respaldar la base antes de mantenimientos importantes, especialmente después de sesiones con caja cerrada y `resumen_snapshot` persistido.

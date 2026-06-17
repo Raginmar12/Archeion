@@ -10,6 +10,7 @@ Este documento define el contrato vigente entre Zephyros y Archeion para captura
 | `/zephyros/chremata/entries_v2.jsonl` | JSONL append-only | Bitácora inmutable de operaciones capturadas localmente. |
 | `/zephyros/chremata/sync_state.json` | JSON normal | Estado mutable de sincronización por `device_entry_id`. |
 | `/zephyros/chremata/material_pool_snapshot.json` | JSON normal | Último snapshot local útil para vista/resumen de material pool. |
+| `/zephyros/chremata/caja_state.json` | JSON normal | Estado local auxiliar de la caja abierta/cerrada en Zephyros. |
 
 ## `/zephyros/config.json`
 
@@ -67,6 +68,8 @@ Operaciones vigentes:
 - `cancelar_ticket` / `chremata.operation.cancelar_ticket.v1`
 - `abandonar_ticket` / `chremata.operation.abandonar_ticket.v1`
 - `crear_gasto_material` / `chremata.operation.crear_gasto_material.v1`
+- `abrir_caja` / `chremata.operation.abrir_caja.v1`
+- `cerrar_caja` / `chremata.operation.cerrar_caja.v1`
 
 ## `sync_state.json`
 
@@ -127,3 +130,14 @@ No usar:
 9. Confirmar que la operación queda `synced`.
 10. Reenviar la misma operación y confirmar que no se duplica.
 11. Revisar en Archeion que `cobrar_ticket` genera ingreso y que `crear_ticket` solo deja ticket pendiente.
+
+
+## Sincronización de caja
+
+- `CajaFisica` es la caja real con llave; Zephyros obtiene `caja_fisica_public_id` desde `cajas_fisicas` de catálogos/schema.
+- `CajaSesion` es la sesión operativa de apertura/cierre; `caja_public_id` es su UUID público.
+- `abrir_caja` y `cerrar_caja` se sincronizan por `POST /api/v1/chremata/operations/` con campos top-level, igual que el resto de operaciones.
+- `cobrar_ticket` y `crear_gasto_material` aceptan `caja_public_id` opcional por compatibilidad temporal; el cliente Zephyros debe enviarlo cuando tenga caja abierta.
+- Crear ticket pendiente puede hacerse sin caja. Cobrar ticket en Zephyros requiere caja abierta.
+- El corte local de Zephyros es auxiliar para operar offline; el corte oficial se consulta en Archeion con `GET /api/v1/chremata/cajas/<caja_public_id>/corte/`.
+- El corte oficial no reemplaza reportes diarios: está delimitado por `CajaSesion` y puede cruzar medianoche.

@@ -10,6 +10,25 @@ X-Archeion-Device-Token: <token-del-dispositivo>
 
 No documentar ni commitear tokens reales. Cada Zephyros debe usar su propio token para poder desactivarlo sin afectar otros dispositivos.
 
+
+## Conceptos de caja y corte
+
+- `CajaFisica` representa la caja real con llave: el contenedor físico donde se guarda efectivo. `caja_fisica_public_id` es su identificador público y aparece en catálogos para que Zephyros pueda elegir la caja física al abrir sesión.
+- `CajaSesion` representa una apertura/cierre operativa de caja. Puede iniciar un día y cerrarse después de medianoche; por eso el corte de caja no reemplaza el reporte diario por fecha calendario.
+- `caja_public_id` es el `CajaSesion.public_id`. En operaciones de cobro y gasto material identifica la sesión abierta a la que se asocia el movimiento.
+- `caja_fisica_public_id` es el `CajaFisica.public_id`. En `abrir_caja` es opcional y vincula la sesión operativa con la caja física usada.
+- El corte oficial se calcula por sesión operativa (`CajaSesion`), no por día natural.
+
+## Catálogos y schema de caja
+
+`GET /api/v1/catalogos/` incluye `cajas_fisicas` activas. `seed_chremata_catalogs` crea una `Caja principal` en base limpia.
+
+`GET /api/v1/chremata/schema/` declara `cajas_fisicas`, las operaciones `abrir_caja` y `cerrar_caja`, el campo opcional `caja_public_id` en `cobrar_ticket` y `crear_gasto_material`, y el endpoint de corte:
+
+```text
+/api/v1/chremata/cajas/<caja_public_id>/corte/
+```
+
 ## Endpoints
 
 ### `GET /api/device/ping/`
@@ -27,6 +46,10 @@ Devuelve el contrato vigente de Chremata: operaciones soportadas, contratos vers
 ### `GET /api/v1/chremata/material-pool/`
 
 Devuelve el estado consolidado del material pool. El material pool es económico, no inventario físico.
+
+### `GET /api/v1/chremata/cajas/<caja_public_id>/corte/`
+
+Devuelve el corte oficial de una `CajaSesion`. El `caja_public_id` de la URL es el `CajaSesion.public_id`, no el `CajaFisica.public_id`.
 
 ### `POST /api/v1/chremata/operations/`
 
@@ -88,11 +111,12 @@ Los UUIDs siguientes son ejemplos sin datos reales.
   "canal_cobro_public_id": "b71aefad-3684-4e81-b457-3c87f1eab001",
   "esquema_comision_public_id": null,
   "concepto_ingreso_resumen_public_id": "1d92078f-6517-4912-9dc8-831f1866b001",
-  "notas": "Cobro capturado offline"
+  "notas": "Cobro capturado offline",
+  "caja_public_id": "9b13055e-bd44-47e2-8d19-70fd0a0d0001"
 }
 ```
 
-`cobrar_ticket` solo opera sobre tickets pendientes y genera ticket pago e ingreso.
+`cobrar_ticket` solo opera sobre tickets pendientes y genera ticket pago e ingreso. `caja_public_id` es opcional por compatibilidad temporal, pero Zephyros debe enviarlo cuando tenga una caja abierta.
 
 ### `crear_gasto_material`
 
@@ -102,16 +126,51 @@ Los UUIDs siguientes son ejemplos sin datos reales.
   "operation_contract": "chremata.operation.crear_gasto_material.v1",
   "device_id": "zephyros-cardputer-principal",
   "device_entry_id": "018fca4d-6800-7c20-9c3d-9bbdc43a1abe",
-  "gasto_material": {
-    "fecha": "2026-06-17T11:00:00-06:00",
-    "monto": "120.00",
-    "descripcion": "Material de curación",
-    "notas": "Compra capturada offline"
-  }
+  "fecha": "2026-06-17T11:00:00-06:00",
+  "monto": "120.00",
+  "descripcion": "Material de curación",
+  "notas": "Compra capturada offline",
+  "caja_public_id": "9b13055e-bd44-47e2-8d19-70fd0a0d0001"
 }
 ```
 
-`crear_gasto_material` registra un gasto económico de material y afecta el material pool.
+`crear_gasto_material` registra un gasto económico de material y afecta el material pool. `caja_public_id` es opcional por compatibilidad temporal, pero Zephyros debe enviarlo cuando el gasto ocurre durante una caja abierta.
+
+
+### `abrir_caja`
+
+```json
+{
+  "operation": "abrir_caja",
+  "operation_contract": "chremata.operation.abrir_caja.v1",
+  "device_id": "zephyros-cardputer-principal",
+  "device_entry_id": "018fca4d-6800-7c20-9c3d-9bbdc43a1ac1",
+  "caja_public_id": "9b13055e-bd44-47e2-8d19-70fd0a0d0001",
+  "caja_fisica_public_id": "30acb409-6528-45c1-92ac-a3d93cb10001",
+  "abierta_en": "2026-06-17T09:00:00-06:00",
+  "saldo_inicial_efectivo": "500.00",
+  "notas_apertura": "Inicio de consulta"
+}
+```
+
+`abrir_caja` crea una `CajaSesion` abierta para el dispositivo. Archeion rechaza abrir otra sesión si el mismo `device_id` ya tiene una caja abierta (`caja_abierta_exists`).
+
+### `cerrar_caja`
+
+```json
+{
+  "operation": "cerrar_caja",
+  "operation_contract": "chremata.operation.cerrar_caja.v1",
+  "device_id": "zephyros-cardputer-principal",
+  "device_entry_id": "018fca4d-6800-7c20-9c3d-9bbdc43a1ac2",
+  "caja_public_id": "9b13055e-bd44-47e2-8d19-70fd0a0d0001",
+  "cerrada_en": "2026-06-17T18:30:00-06:00",
+  "efectivo_contado_cierre": "1200.00",
+  "notas_cierre": "Cierre sin incidencias"
+}
+```
+
+`cerrar_caja` cierra la sesión, calcula el corte oficial y persiste `resumen_snapshot` en la caja cerrada.
 
 ### `cancelar_ticket`
 
@@ -154,6 +213,8 @@ Los UUIDs siguientes son ejemplos sin datos reales.
 | `cancelar_ticket` | `chremata.operation.cancelar_ticket.v1` | Cancela un ticket pendiente. No crea ingreso. |
 | `abandonar_ticket` | `chremata.operation.abandonar_ticket.v1` | Marca un ticket pendiente como abandonado. No crea ingreso. |
 | `crear_gasto_material` | `chremata.operation.crear_gasto_material.v1` | Registra gasto de material y afecta el material pool. |
+| `abrir_caja` | `chremata.operation.abrir_caja.v1` | Abre una `CajaSesion` para el dispositivo. |
+| `cerrar_caja` | `chremata.operation.cerrar_caja.v1` | Cierra una `CajaSesion`, calcula diferencia y persiste `resumen_snapshot`. |
 
 ## Idempotencia
 
@@ -178,3 +239,30 @@ Un conflicto ocurre cuando existe una operación previa para el mismo `device_id
 ## Material pool
 
 El material pool es una medición económica para comparar gastos de material contra cobros explícitos de material. No es inventario físico, no maneja existencias por pieza y no debe usarse para clínicos ni almacén.
+
+
+## Corte oficial de caja
+
+El corte oficial vive en Archeion y se consulta con:
+
+```http
+GET /api/v1/chremata/cajas/<caja_public_id>/corte/
+```
+
+La respuesta usa el contrato `chremata.corte_caja.v1` e incluye estas secciones principales:
+
+- `caja`: datos de la `CajaSesion`, su estado, horarios y caja física asociada cuando exista.
+- `efectivo`: `saldo_inicial_efectivo`, `total_efectivo`, `efectivo_esperado`, `efectivo_contado_cierre` y `diferencia_efectivo`.
+- `totales`: bruto, efectivo, tarjeta, transferencia, material cobrado, comisiones y neto estimado.
+- `totales_por_metodo`: agrupación por método de pago.
+- `totales_por_canal`: agrupación por canal de cobro.
+- `totales_por_concepto`: agrupación por conceptos tomados desde `TicketLinea`, no desde el concepto resumen del pago.
+- `gastos_material`: cantidad, total y detalle de gastos de material asociados a la caja.
+- `tickets`: conteos operativos de tickets cobrados y tickets creados durante el intervalo de la caja.
+
+Reglas importantes:
+
+- `efectivo_esperado = saldo_inicial_efectivo + total_efectivo`.
+- El gasto de material se reporta aparte y no resta el `efectivo_esperado`.
+- `cerrar_caja` persiste el corte calculado en `resumen_snapshot`.
+- El corte puede cruzar medianoche porque depende de `CajaSesion.abierta_en` y `CajaSesion.cerrada_en`, no de un día calendario.
