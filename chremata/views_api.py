@@ -328,6 +328,50 @@ def _chremata_operations_schema():
         },
     }
 
+    operaciones["abrir_caja"] = {
+        **_ticket_operation_common("chremata.operation.abrir_caja.v1"),
+        "payload_fields": [
+            _campo_schema("operation", "string"),
+            _campo_schema("operation_contract", "string"),
+            _campo_schema("device_id", "string"),
+            _campo_schema("device_entry_id", "string"),
+            _campo_schema("caja_public_id", "uuid"),
+            _campo_schema(
+                "caja_fisica_public_id",
+                "uuid",
+                required=False,
+                nullable=True,
+                relation="cajas_fisicas.public_id",
+            ),
+            _campo_schema("abierta_en", "datetime_utc_string"),
+            _campo_schema("saldo_inicial_efectivo", "money_string"),
+            _campo_schema("notas_apertura", "string", required=False),
+        ],
+        "server_authority": {
+            "creates_caja_sesion": True,
+            "requires_unique_open_session_by_device": True,
+            "does_not_change_payments": True,
+        },
+    }
+    operaciones["cerrar_caja"] = {
+        **_ticket_operation_common("chremata.operation.cerrar_caja.v1"),
+        "payload_fields": [
+            _campo_schema("operation", "string"),
+            _campo_schema("operation_contract", "string"),
+            _campo_schema("device_id", "string"),
+            _campo_schema("device_entry_id", "string"),
+            _campo_schema("caja_public_id", "uuid", relation="caja_sesion.public_id"),
+            _campo_schema("cerrada_en", "datetime_utc_string"),
+            _campo_schema("efectivo_contado_cierre", "money_string"),
+            _campo_schema("notas_cierre", "string", required=False),
+        ],
+        "server_authority": {
+            "closes_caja_sesion": True,
+            "snapshots_zero_totals_until_payments_are_linked": True,
+            "does_not_change_payments": True,
+        },
+    }
+
     operaciones["crear_ticket"] = {
         **_ticket_operation_common("chremata.operation.crear_ticket.v1"),
         "payload_fields": [
@@ -669,6 +713,8 @@ def chremata_schema(request):
                 "operations": [
                     "chremata.operation.crear_ingreso.v1",
                     "chremata.operation.crear_gasto_material.v1",
+                    "chremata.operation.abrir_caja.v1",
+                    "chremata.operation.cerrar_caja.v1",
                     "chremata.operation.crear_ticket.v1",
                     "chremata.operation.cobrar_ticket.v1",
                     "chremata.operation.cancelar_ticket.v1",

@@ -9,6 +9,8 @@ from django.db import transaction
 from django.utils import timezone
 
 from .models import (
+    CajaFisica,
+    CajaSesion,
     CanalCobro,
     ConceptoIngreso,
     EsquemaComision,
@@ -32,6 +34,10 @@ ABANDONAR_TICKET = "abandonar_ticket"
 ABANDONAR_TICKET_CONTRACT = "chremata.operation.abandonar_ticket.v1"
 CREAR_GASTO_MATERIAL = "crear_gasto_material"
 CREAR_GASTO_MATERIAL_CONTRACT = "chremata.operation.crear_gasto_material.v1"
+ABRIR_CAJA = "abrir_caja"
+ABRIR_CAJA_CONTRACT = "chremata.operation.abrir_caja.v1"
+CERRAR_CAJA = "cerrar_caja"
+CERRAR_CAJA_CONTRACT = "chremata.operation.cerrar_caja.v1"
 
 
 class OperationValidationError(Exception):
@@ -147,12 +153,10 @@ def parse_datetime_utc_string(value, field):
             fields={field: "invalid_datetime_utc_string"},
             status_code=400,
         ) from exc
-    if parsed.tzinfo is None or parsed.utcoffset() != datetime_timezone.utc.utcoffset(
-        parsed
-    ):
+    if parsed.tzinfo is None or parsed.utcoffset() is None:
         raise OperationValidationError(
             "invalid_datetime",
-            f"{field} debe incluir zona horaria UTC.",
+            f"{field} debe incluir zona horaria.",
             fields={field: "invalid_datetime_utc_string"},
             status_code=400,
         )
@@ -248,13 +252,15 @@ def _validar_operacion_soportada(payload):
         CANCELAR_TICKET: CANCELAR_TICKET_CONTRACT,
         ABANDONAR_TICKET: ABANDONAR_TICKET_CONTRACT,
         CREAR_GASTO_MATERIAL: CREAR_GASTO_MATERIAL_CONTRACT,
+        ABRIR_CAJA: ABRIR_CAJA_CONTRACT,
+        CERRAR_CAJA: CERRAR_CAJA_CONTRACT,
     }
     operation = payload["operation"]
     if operation not in contratos:
         raise OperationValidationError(
             "unsupported_operation",
             "Esta fase soporta crear_ticket, cobrar_ticket, cancelar_ticket, "
-            "abandonar_ticket y crear_gasto_material.",
+            "abandonar_ticket, crear_gasto_material, abrir_caja y cerrar_caja.",
             fields={"operation": "unsupported"},
             status_code=400,
         )
@@ -265,6 +271,250 @@ def _validar_operacion_soportada(payload):
             fields={"operation_contract": "invalid"},
             status_code=400,
         )
+
+
+def _validar_money_no_negativo(valor, campo):
+    monto = parse_money_string(valor, campo)
+    if monto < Decimal("0.00"):
+        raise OperationValidationError(
+            "business_validation_error",
+            f"{campo} debe ser mayor o igual que cero.",
+            fields={campo: ["Debe ser mayor o igual que cero."]},
+            status_code=422,
+        )
+    return monto
+
+
+def _serializar_caja_fisica_operacion(caja_fisica):
+    if caja_fisica is None:
+        return None
+    return {
+        "public_id": str(caja_fisica.public_id),
+        "nombre": caja_fisica.nombre,
+    }
+
+
+def _resultado_caja_abierta(caja):
+    return {
+        "caja_public_id": str(caja.public_id),
+        "estado": caja.estado,
+        "abierta_en": _datetime_utc_string(caja.abierta_en),
+        "saldo_inicial_efectivo": _decimal_money_string(
+            caja.saldo_inicial_efectivo,
+        ),
+        "caja_fisica": _serializar_caja_fisica_operacion(caja.caja_fisica),
+    }
+
+
+def _totales_caja_cero():
+    return {
+        "total_efectivo": Decimal("0.00"),
+        "total_tarjeta": Decimal("0.00"),
+        "total_transferencia": Decimal("0.00"),
+        "total_bruto": Decimal("0.00"),
+        "total_material_cobrado": Decimal("0.00"),
+        "total_comisiones": Decimal("0.00"),
+        "total_neto_estimado": Decimal("0.00"),
+    }
+
+
+def _totales_caja_cero_strings():
+    return {
+        campo: _decimal_money_string(valor)
+        for campo, valor in _totales_caja_cero().items()
+    }
+
+
+def _resultado_caja_cerrada(caja):
+    return {
+        "caja_public_id": str(caja.public_id),
+        "estado": caja.estado,
+        "abierta_en": _datetime_utc_string(caja.abierta_en),
+        "cerrada_en": _datetime_utc_string(caja.cerrada_en),
+        "saldo_inicial_efectivo": _decimal_money_string(
+            caja.saldo_inicial_efectivo,
+        ),
+        "efectivo_contado_cierre": _decimal_money_string(
+            caja.efectivo_contado_cierre,
+        ),
+        "efectivo_esperado": _decimal_money_string(caja.efectivo_esperado),
+        "diferencia_efectivo": _decimal_money_string(caja.diferencia_efectivo),
+        **_totales_caja_cero_strings(),
+    }
+
+
+def _handle_abrir_caja(payload):
+    require_fields(payload, ["caja_public_id", "abierta_en", "saldo_inicial_efectivo"])
+    caja_public_id = parse_uuid(payload["caja_public_id"], "caja_public_id")
+    abierta_en = parse_datetime_utc_string(payload["abierta_en"], "abierta_en")
+    saldo_inicial_efectivo = _validar_money_no_negativo(
+        payload["saldo_inicial_efectivo"],
+        "saldo_inicial_efectivo",
+    )
+
+    notas_apertura = payload.get("notas_apertura", "")
+    if not isinstance(notas_apertura, str):
+        raise OperationValidationError(
+            "invalid_payload",
+            "notas_apertura debe ser string.",
+            fields={"notas_apertura": "invalid_string"},
+            status_code=400,
+        )
+
+    caja_fisica = None
+    if payload.get("caja_fisica_public_id") is not None:
+        caja_fisica_public_id = parse_uuid(
+            payload["caja_fisica_public_id"],
+            "caja_fisica_public_id",
+        )
+        caja_fisica = get_by_public_id(
+            CajaFisica,
+            caja_fisica_public_id,
+            "caja_fisica_public_id",
+        )
+        if not caja_fisica.activa:
+            raise OperationValidationError(
+                "business_validation_error",
+                "La caja física no está activa.",
+                fields={"caja_fisica_public_id": ["La caja física no está activa."]},
+                status_code=422,
+            )
+
+    if CajaSesion.objects.filter(public_id=caja_public_id).exists():
+        raise OperationValidationError(
+            "caja_public_id_conflict",
+            "Ya existe una sesión de caja con ese caja_public_id.",
+            fields={"caja_public_id": "already_exists"},
+            status_code=409,
+            operation_status=OperacionDispositivoChremata.STATUS_CONFLICT,
+        )
+
+    if CajaSesion.objects.filter(
+        device_id=payload["device_id"],
+        estado=CajaSesion.ESTADO_ABIERTA,
+    ).exists():
+        raise OperationValidationError(
+            "caja_abierta_exists",
+            "Ya existe una sesión de caja abierta para este dispositivo.",
+            fields={"device_id": ["Ya existe una caja abierta para este dispositivo."]},
+            status_code=422,
+        )
+
+    caja = CajaSesion.objects.create(
+        public_id=caja_public_id,
+        device_id=payload["device_id"],
+        caja_fisica=caja_fisica,
+        estado=CajaSesion.ESTADO_ABIERTA,
+        abierta_en=abierta_en,
+        saldo_inicial_efectivo=saldo_inicial_efectivo,
+        notas_apertura=notas_apertura,
+    )
+    return caja, _resultado_caja_abierta(caja)
+
+
+def _crear_resumen_snapshot_cierre(caja):
+    result = _resultado_caja_cerrada(caja)
+    return {
+        "contract": "chremata.caja_sesion.cierre_snapshot.v1",
+        "generated_at": _datetime_utc_string(timezone.now()),
+        "caja": {
+            "caja_public_id": result["caja_public_id"],
+            "estado": result["estado"],
+            "device_id": caja.device_id,
+            "caja_fisica": _serializar_caja_fisica_operacion(caja.caja_fisica),
+            "abierta_en": result["abierta_en"],
+            "cerrada_en": result["cerrada_en"],
+        },
+        "totales": {
+            campo: result[campo]
+            for campo in _totales_caja_cero().keys()
+        },
+        "efectivo": {
+            "saldo_inicial_efectivo": result["saldo_inicial_efectivo"],
+            "efectivo_contado_cierre": result["efectivo_contado_cierre"],
+            "efectivo_esperado": result["efectivo_esperado"],
+            "diferencia_efectivo": result["diferencia_efectivo"],
+        },
+    }
+
+
+def _handle_cerrar_caja(payload):
+    require_fields(
+        payload,
+        ["caja_public_id", "cerrada_en", "efectivo_contado_cierre"],
+    )
+    caja_public_id = parse_uuid(payload["caja_public_id"], "caja_public_id")
+    cerrada_en = parse_datetime_utc_string(payload["cerrada_en"], "cerrada_en")
+    efectivo_contado_cierre = _validar_money_no_negativo(
+        payload["efectivo_contado_cierre"],
+        "efectivo_contado_cierre",
+    )
+    notas_cierre = payload.get("notas_cierre", "")
+    if not isinstance(notas_cierre, str):
+        raise OperationValidationError(
+            "invalid_payload",
+            "notas_cierre debe ser string.",
+            fields={"notas_cierre": "invalid_string"},
+            status_code=400,
+        )
+
+    caja = get_by_public_id(CajaSesion, caja_public_id, "caja_public_id")
+    if caja.estado != CajaSesion.ESTADO_ABIERTA:
+        raise OperationValidationError(
+            "business_validation_error",
+            "Solo se pueden cerrar sesiones de caja abiertas.",
+            fields={"estado": ["Solo se pueden cerrar sesiones de caja abiertas."]},
+            status_code=422,
+        )
+    if cerrada_en < caja.abierta_en:
+        raise OperationValidationError(
+            "business_validation_error",
+            "La fecha de cierre debe ser mayor o igual que la fecha de apertura.",
+            fields={
+                "cerrada_en": [
+                    "La fecha de cierre debe ser mayor o igual que la fecha de apertura."
+                ]
+            },
+            status_code=422,
+        )
+
+    totales = _totales_caja_cero()
+    efectivo_esperado = caja.saldo_inicial_efectivo
+    diferencia_efectivo = (efectivo_contado_cierre - efectivo_esperado).quantize(
+        PESOS_DECIMALES,
+        rounding=ROUND_HALF_UP,
+    )
+
+    for campo, valor in totales.items():
+        setattr(caja, campo, valor)
+    caja.estado = CajaSesion.ESTADO_CERRADA
+    caja.cerrada_en = cerrada_en
+    caja.efectivo_contado_cierre = efectivo_contado_cierre
+    caja.efectivo_esperado = efectivo_esperado
+    caja.diferencia_efectivo = diferencia_efectivo
+    caja.notas_cierre = notas_cierre
+    caja.resumen_snapshot = _crear_resumen_snapshot_cierre(caja)
+    caja.full_clean()
+    caja.save(
+        update_fields=[
+            "estado",
+            "cerrada_en",
+            "efectivo_contado_cierre",
+            "efectivo_esperado",
+            "diferencia_efectivo",
+            "total_efectivo",
+            "total_tarjeta",
+            "total_transferencia",
+            "total_bruto",
+            "total_material_cobrado",
+            "total_comisiones",
+            "total_neto_estimado",
+            "notas_cierre",
+            "resumen_snapshot",
+            "actualizado_en",
+        ],
+    )
+    return caja, _resultado_caja_cerrada(caja)
 
 
 def _validar_linea(linea, indice):
@@ -643,7 +893,17 @@ def _handle_cobrar_ticket(payload):
 def _procesar_payload_nuevo(payload):
     _validar_operacion_soportada(payload)
     gasto_material = None
-    if payload["operation"] == CREAR_TICKET:
+    if payload["operation"] == ABRIR_CAJA:
+        _caja, result = _handle_abrir_caja(payload)
+        ticket = None
+        ingreso = None
+        pago = None
+    elif payload["operation"] == CERRAR_CAJA:
+        _caja, result = _handle_cerrar_caja(payload)
+        ticket = None
+        ingreso = None
+        pago = None
+    elif payload["operation"] == CREAR_TICKET:
         ticket, result = _handle_crear_ticket(payload)
         ingreso = None
         pago = None
