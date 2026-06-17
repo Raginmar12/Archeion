@@ -82,6 +82,7 @@ Notas importantes:
 - `X-Archeion-Device-Token`: header obligatorio para rutas protegidas bajo `/api/`.
 - `ARCHEION_DEVICE_TOKEN`: fallback temporal/de emergencia si no hay tokens activos en base de datos. Cuando existe al menos un token activo en base, la API exige un token activo de base de datos.
 - `archeion_base_url`: URL base usada por Zephyros para llegar a Archeion desde la red local.
+- `ALLOWED_HOSTS`: lista separada por comas de hosts/IPs aceptados por Django. Si Zephyros usa una IP LAN en `archeion_base_url`, esa IP también debe estar incluida aquí.
 - `db.sqlite3`: base SQLite local; debe respaldarse antes de cambios importantes.
 
 ## Ejemplo de `/zephyros/config.json`
@@ -100,6 +101,8 @@ Ejemplo sin secretos reales:
 Recomendaciones:
 
 - Usar IP local si `archeion.local` no resuelve.
+- Si se usa una IP LAN como `http://192.168.1.50:8000`, agregar esa IP a `ALLOWED_HOSTS`; de lo contrario Django puede responder `400 Bad Request` antes de llegar a la API o validar el token.
+- Ejemplo: `ALLOWED_HOSTS=127.0.0.1,localhost,archeion,archeion.local,192.168.1.50`.
 - No imprimir el token en pantalla de diagnóstico ni logs persistentes.
 - Mantener `device_id` estable para conservar idempotencia.
 

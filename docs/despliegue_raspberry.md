@@ -32,9 +32,12 @@ Ejemplo sin secretos reales:
 
 ```bash
 DJANGO_SETTINGS_MODULE=archeion.settings
+ALLOWED_HOSTS=127.0.0.1,localhost,archeion,archeion.local,192.168.1.50
 # SECRET_KEY=definir_fuera_del_repositorio_si_se_formaliza_produccion
 # DEBUG=False cuando se formalice despliegue no-dev
 ```
+
+La variable `ALLOWED_HOSTS` debe incluir el hostname o la IP fija/reservada que Zephyros usa en `archeion_base_url`; por ejemplo, la IP LAN de la Raspberry.
 
 Pendiente: definir variables finales requeridas para el servicio permanente.
 

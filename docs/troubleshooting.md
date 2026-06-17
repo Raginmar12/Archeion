@@ -42,6 +42,19 @@ Confirmar que ambos dispositivos están en la misma red.
 - En Raspberry, usar `hostname -I` o la lista de clientes del router.
 - Configurar `http://IP:8000` mientras se use `runserver` o `gunicorn` en ese puerto.
 
+
+## Zephyros no conecta y Archeion responde `400 Bad Request`
+
+Causa probable:
+
+- La IP o hostname usado por `archeion_base_url` no está incluido en `ALLOWED_HOSTS`. Django rechaza la solicitud antes de llegar a la API o al middleware de token.
+
+Solución:
+
+- Agregar a `ALLOWED_HOSTS` el mismo host o IP que usa Zephyros.
+- Ejemplo: `ALLOWED_HOSTS=127.0.0.1,localhost,archeion,archeion.local,192.168.1.50`.
+- Reiniciar Archeion después de cambiar la variable de entorno.
+
 ## Windows firewall
 
 Si Archeion corre en Windows y Zephyros no conecta:
