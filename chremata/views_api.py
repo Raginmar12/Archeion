@@ -4,12 +4,15 @@ from decimal import Decimal
 
 from django.db.models import Max, Prefetch, Sum
 from django.http import JsonResponse
+from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from django.views.decorators.http import require_GET, require_POST
 
 from .operations import OperationValidationError, procesar_operacion_chremata
+from .services import calcular_corte_caja
 from .models import (
     CajaFisica,
+    CajaSesion,
     CanalCobro,
     ConceptoIngreso,
     EsquemaComision,
@@ -121,6 +124,25 @@ def _chremata_catalogs_schema():
                 _campo_schema("nombre", "string"),
                 _campo_schema("descripcion", "string", required=False),
             ],
+        },
+    }
+
+
+def _chremata_caja_schema():
+    return {
+        "corte_endpoint": "/api/v1/chremata/cajas/<caja_public_id>/corte/",
+        "corte_contract": "chremata.corte_caja.v1",
+        "fields": {
+            "contract": {"type": "string", "required": True},
+            "generated_at": {"type": "datetime_utc_string", "required": True},
+            "caja": {"type": "object", "required": True},
+            "efectivo": {"type": "object", "required": True},
+            "totales": {"type": "object", "required": True},
+            "totales_por_metodo": {"type": "array", "required": True},
+            "totales_por_canal": {"type": "array", "required": True},
+            "totales_por_concepto": {"type": "array", "required": True},
+            "gastos_material": {"type": "object", "required": True},
+            "tickets": {"type": "object", "required": True},
         },
     }
 
@@ -650,6 +672,12 @@ def material_pool(request):
 
 
 @require_GET
+def corte_caja(request, caja_public_id):
+    caja_sesion = get_object_or_404(CajaSesion, public_id=caja_public_id)
+    return JsonResponse(calcular_corte_caja(caja_sesion))
+
+
+@require_GET
 def catalogos(request):
     generated_at_iso = _generated_at_iso()
 
@@ -751,6 +779,7 @@ def chremata_schema(request):
                 "nullable_fields_use_null": True,
             },
             "material_pool": _chremata_material_pool_schema(),
+            "caja": _chremata_caja_schema(),
             "tickets": _chremata_tickets_schema(),
             "catalogs": _chremata_catalogs_schema(),
             "operations": _chremata_operations_schema(),

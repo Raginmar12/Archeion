@@ -22,7 +22,12 @@ from .models import (
     Ticket,
     TicketLinea,
 )
-from .services import abandonar_ticket, cancelar_ticket, cobrar_ticket
+from .services import (
+    abandonar_ticket,
+    calcular_corte_caja,
+    cancelar_ticket,
+    cobrar_ticket,
+)
 
 CREAR_TICKET = "crear_ticket"
 CREAR_TICKET_CONTRACT = "chremata.operation.crear_ticket.v1"
@@ -524,22 +529,24 @@ def _handle_cerrar_caja(payload):
             status_code=422,
         )
 
-    totales = _totales_caja_cero()
-    efectivo_esperado = caja.saldo_inicial_efectivo
-    diferencia_efectivo = (efectivo_contado_cierre - efectivo_esperado).quantize(
-        PESOS_DECIMALES,
-        rounding=ROUND_HALF_UP,
-    )
-
-    for campo, valor in totales.items():
-        setattr(caja, campo, valor)
     caja.estado = CajaSesion.ESTADO_CERRADA
     caja.cerrada_en = cerrada_en
     caja.efectivo_contado_cierre = efectivo_contado_cierre
-    caja.efectivo_esperado = efectivo_esperado
-    caja.diferencia_efectivo = diferencia_efectivo
     caja.notas_cierre = notas_cierre
-    caja.resumen_snapshot = _crear_resumen_snapshot_cierre(caja)
+
+    corte = calcular_corte_caja(caja)
+    totales = corte["totales"]
+    efectivo = corte["efectivo"]
+    caja.total_efectivo = Decimal(totales["total_efectivo"])
+    caja.total_tarjeta = Decimal(totales["total_tarjeta"])
+    caja.total_transferencia = Decimal(totales["total_transferencia"])
+    caja.total_bruto = Decimal(totales["total_bruto"])
+    caja.total_material_cobrado = Decimal(totales["total_material_cobrado"])
+    caja.total_comisiones = Decimal(totales["total_comisiones"])
+    caja.total_neto_estimado = Decimal(totales["total_neto_estimado"])
+    caja.efectivo_esperado = Decimal(efectivo["efectivo_esperado"])
+    caja.diferencia_efectivo = Decimal(efectivo["diferencia_efectivo"])
+    caja.resumen_snapshot = corte
     caja.full_clean()
     caja.save(
         update_fields=[

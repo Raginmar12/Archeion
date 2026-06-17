@@ -21,6 +21,7 @@ from django.urls import path
 from chremata.views_api import (
     catalogos,
     chremata_operations,
+    corte_caja,
     chremata_schema,
     material_pool,
 )
@@ -40,6 +41,11 @@ urlpatterns = [
         "api/v1/chremata/material-pool/",
         material_pool,
         name="api-v1-chremata-material-pool",
+    ),
+    path(
+        "api/v1/chremata/cajas/<uuid:caja_public_id>/corte/",
+        corte_caja,
+        name="api-v1-chremata-caja-corte",
     ),
     path(
         "api/v1/chremata/operations/",

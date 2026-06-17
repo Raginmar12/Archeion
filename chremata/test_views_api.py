@@ -9,6 +9,8 @@ from django.urls import reverse
 
 from core.models import DeviceToken
 
+from .services import calcular_corte_caja, cobrar_ticket
+
 from .models import (
     CajaFisica,
     CajaSesion,
@@ -979,7 +981,7 @@ class ChremataOperationsApiTests(TestCase):
         self.assertEqual(caja.total_neto_estimado, Decimal("0.00"))
         self.assertEqual(caja.efectivo_esperado, Decimal("500.00"))
         self.assertEqual(caja.diferencia_efectivo, Decimal("750.00"))
-        self.assertEqual(caja.resumen_snapshot["contract"], "chremata.caja_sesion.cierre_snapshot.v1")
+        self.assertEqual(caja.resumen_snapshot["contract"], "chremata.corte_caja.v1")
         self.assertEqual(
             caja.resumen_snapshot["efectivo"]["diferencia_efectivo"],
             "750.00",
@@ -2359,6 +2361,232 @@ class ChremataOperationsEndToEndTests(TestCase):
 
 
 @override_settings(DEBUG=False, ARCHEION_DEVICE_TOKEN="")
+class CorteCajaApiTests(TestCase):
+    def setUp(self):
+        self.device_token, self.token_completo = DeviceToken.crear("Zephyros corte")
+        self.metodo_efectivo = MetodoPago.objects.create(nombre="Efectivo")
+        self.metodo_tarjeta = MetodoPago.objects.create(nombre="Tarjeta")
+        self.metodo_transferencia = MetodoPago.objects.create(nombre="Transferencia")
+        self.esquema_sin_comision = EsquemaComision.objects.create(
+            nombre="Sin comisión",
+            porcentaje_base=Decimal("0.0000"),
+        )
+        self.esquema_mp = EsquemaComision.objects.create(
+            nombre="Mercado Pago 3.5% + IVA",
+            porcentaje_base=Decimal("3.5000"),
+            cobra_iva=True,
+        )
+        self.canal_efectivo = CanalCobro.objects.create(
+            nombre="Efectivo en caja",
+            metodo_pago=self.metodo_efectivo,
+            esquema_comision_predeterminado=self.esquema_sin_comision,
+        )
+        self.canal_spei = CanalCobro.objects.create(
+            nombre="SPEI",
+            metodo_pago=self.metodo_transferencia,
+            esquema_comision_predeterminado=self.esquema_sin_comision,
+        )
+        self.canal_tap = CanalCobro.objects.create(
+            nombre="Tap (MP)",
+            metodo_pago=self.metodo_tarjeta,
+            esquema_comision_predeterminado=self.esquema_mp,
+        )
+        self.canal_point = CanalCobro.objects.create(
+            nombre="Point Air (MP)",
+            metodo_pago=self.metodo_tarjeta,
+            esquema_comision_predeterminado=self.esquema_mp,
+        )
+        self.esquema_sin_comision.canales_cobro.add(self.canal_efectivo, self.canal_spei)
+        self.esquema_mp.canales_cobro.add(self.canal_tap, self.canal_point)
+        self.origen = OrigenIngreso.objects.create(nombre="Consultorio")
+        self.concepto_consulta = ConceptoIngreso.objects.create(nombre="Consulta")
+        self.concepto_curacion = ConceptoIngreso.objects.create(
+            nombre="Curación",
+            permite_material_adicional=True,
+        )
+        self.concepto_resumen = ConceptoIngreso.objects.create(
+            nombre="Resumen",
+            permite_material_adicional=True,
+        )
+        self.caja = CajaSesion.objects.create(
+            device_id="zephyros-cardputer",
+            abierta_en=datetime(2026, 6, 18, 4, 30, tzinfo=datetime_timezone.utc),
+            saldo_inicial_efectivo=Decimal("500.00"),
+        )
+
+    def corte_url(self, caja=None):
+        return reverse("api-v1-chremata-caja-corte", args=[caja or self.caja.public_id])
+
+    def get_corte(self, caja=None, token=None):
+        headers = {}
+        if token is None:
+            headers["X-Archeion-Device-Token"] = self.token_completo
+        elif token:
+            headers["X-Archeion-Device-Token"] = token
+        return self.client.get(self.corte_url(caja), headers=headers)
+
+    def crear_ticket(self, lineas):
+        ticket = Ticket.objects.create(
+            fecha=datetime(2026, 6, 18, 5, 0, tzinfo=datetime_timezone.utc),
+            estado=Ticket.ESTADO_PENDIENTE,
+            origen=self.origen,
+        )
+        for orden, linea in enumerate(lineas, start=1):
+            TicketLinea.objects.create(ticket=ticket, orden=orden, **linea)
+        ticket.refresh_from_db()
+        return ticket
+
+    def cobrar_en_caja(self, canal, lineas, *, concepto_resumen=None):
+        ticket = self.crear_ticket(lineas)
+        return cobrar_ticket(
+            ticket=ticket,
+            fecha_cobro=datetime(2026, 6, 18, 5, 30, tzinfo=datetime_timezone.utc),
+            canal_cobro=canal,
+            concepto_ingreso=concepto_resumen or self.concepto_resumen,
+            caja_sesion=self.caja,
+        )
+
+    def test_corte_caja_abierta_sin_cobros_devuelve_totales_cero(self):
+        corte = calcular_corte_caja(self.caja)
+
+        self.assertEqual(corte["contract"], "chremata.corte_caja.v1")
+        self.assertEqual(corte["totales"]["total_bruto"], "0.00")
+        self.assertEqual(corte["efectivo"]["efectivo_esperado"], "500.00")
+        self.assertIsNone(corte["efectivo"]["efectivo_contado_cierre"])
+        self.assertIsNone(corte["efectivo"]["diferencia_efectivo"])
+
+    def test_corte_caja_cerrada_sin_cobros_devuelve_diferencia(self):
+        self.caja.estado = CajaSesion.ESTADO_CERRADA
+        self.caja.cerrada_en = datetime(2026, 6, 18, 7, 0, tzinfo=datetime_timezone.utc)
+        self.caja.efectivo_contado_cierre = Decimal("450.00")
+        self.caja.save()
+
+        corte = calcular_corte_caja(self.caja)
+
+        self.assertEqual(corte["efectivo"]["efectivo_esperado"], "500.00")
+        self.assertEqual(corte["efectivo"]["diferencia_efectivo"], "-50.00")
+
+    def test_corte_suma_totales_por_metodo_y_canal(self):
+        linea = {
+            "concepto": self.concepto_consulta,
+            "cantidad": Decimal("1.00"),
+            "monto_unitario": Decimal("100.00"),
+        }
+        self.cobrar_en_caja(self.canal_efectivo, [linea])
+        self.cobrar_en_caja(self.canal_spei, [linea])
+        self.cobrar_en_caja(self.canal_tap, [linea])
+        self.cobrar_en_caja(self.canal_point, [linea])
+
+        corte = calcular_corte_caja(self.caja)
+
+        self.assertEqual(corte["totales"]["total_efectivo"], "100.00")
+        self.assertEqual(corte["totales"]["total_transferencia"], "100.00")
+        self.assertEqual(corte["totales"]["total_tarjeta"], "200.00")
+        self.assertEqual(corte["totales"]["total_comisiones"], "8.12")
+        canales = {item["canal_cobro"]: item for item in corte["totales_por_canal"]}
+        self.assertEqual(set(canales), {"Efectivo en caja", "SPEI", "Tap (MP)", "Point Air (MP)"})
+        self.assertEqual(canales["Tap (MP)"]["total_comisiones"], "4.06")
+
+    def test_corte_agrupa_conceptos_desde_ticket_linea_y_no_resumen(self):
+        self.cobrar_en_caja(
+            self.canal_efectivo,
+            [
+                {
+                    "concepto": self.concepto_consulta,
+                    "cantidad": Decimal("2.00"),
+                    "monto_unitario": Decimal("100.00"),
+                },
+                {
+                    "concepto": self.concepto_curacion,
+                    "cantidad": Decimal("1.00"),
+                    "monto_unitario": Decimal("80.00"),
+                    "monto_material_cobrado": Decimal("25.00"),
+                },
+            ],
+            concepto_resumen=self.concepto_resumen,
+        )
+
+        corte = calcular_corte_caja(self.caja)
+
+        conceptos = {item["concepto"]: item for item in corte["totales_por_concepto"]}
+        self.assertEqual(set(conceptos), {"Consulta", "Curación"})
+        self.assertEqual(conceptos["Consulta"]["cantidad_total"], "2")
+        self.assertEqual(conceptos["Consulta"]["lineas"], 1)
+        self.assertEqual(conceptos["Consulta"]["total"], "200.00")
+        self.assertEqual(conceptos["Curación"]["material_cobrado"], "25.00")
+        self.assertNotIn("Resumen", conceptos)
+
+    def test_gastos_material_aparecen_y_no_restan_efectivo(self):
+        GastoMaterial.objects.create(
+            caja_sesion=self.caja,
+            fecha=datetime(2026, 6, 18, 6, 0, tzinfo=datetime_timezone.utc),
+            monto=Decimal("120.00"),
+            descripcion="Gasas",
+        )
+
+        corte = calcular_corte_caja(self.caja)
+
+        self.assertEqual(corte["gastos_material"]["cantidad"], 1)
+        self.assertEqual(corte["gastos_material"]["total_gastos_material"], "120.00")
+        self.assertEqual(corte["efectivo"]["efectivo_esperado"], "500.00")
+        self.assertEqual(Ingreso.calcular_pool_material_actual(), Decimal("120.00"))
+
+    def test_cerrar_caja_persiste_snapshot_real_y_diferencia(self):
+        self.cobrar_en_caja(
+            self.canal_efectivo,
+            [
+                {
+                    "concepto": self.concepto_consulta,
+                    "cantidad": Decimal("1.00"),
+                    "monto_unitario": Decimal("100.00"),
+                }
+            ],
+        )
+        payload = {
+            "operation": "cerrar_caja",
+            "operation_contract": "chremata.operation.cerrar_caja.v1",
+            "device_id": self.caja.device_id,
+            "device_entry_id": str(uuid4()),
+            "caja_public_id": str(self.caja.public_id),
+            "cerrada_en": "2026-06-18T07:00:00Z",
+            "efectivo_contado_cierre": "590.00",
+            "notas_cierre": "Faltan 10",
+        }
+
+        response = self.client.post(
+            reverse("api-v1-chremata-operations"),
+            data=json.dumps(payload),
+            content_type="application/json",
+            headers={"X-Archeion-Device-Token": self.token_completo},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.caja.refresh_from_db()
+        self.assertEqual(self.caja.total_efectivo, Decimal("100.00"))
+        self.assertEqual(self.caja.efectivo_esperado, Decimal("600.00"))
+        self.assertEqual(self.caja.diferencia_efectivo, Decimal("-10.00"))
+        self.assertEqual(self.caja.resumen_snapshot["contract"], "chremata.corte_caja.v1")
+        self.assertEqual(self.caja.resumen_snapshot["totales"]["total_bruto"], "100.00")
+
+    def test_endpoint_requiere_token(self):
+        response = self.get_corte(token="")
+
+        self.assertEqual(response.status_code, 401)
+
+    def test_endpoint_caja_inexistente_devuelve_404(self):
+        response = self.get_corte(caja=uuid4())
+
+        self.assertEqual(response.status_code, 404)
+
+    def test_endpoint_devuelve_corte(self):
+        response = self.get_corte()
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["contract"], "chremata.corte_caja.v1")
+        self.assertIn("totales_por_concepto", response.json())
+
+
+@override_settings(DEBUG=False, ARCHEION_DEVICE_TOKEN="")
 class MaterialPoolApiTests(TestCase):
     def setUp(self):
         self.device_token, self.token_completo = DeviceToken.crear("Zephyros")
@@ -2995,6 +3223,16 @@ class ChremataSchemaApiTests(TestCase):
 
     def test_schema_sigue_declarando_material_pool(self):
         self.assertIn("material_pool", self.get_schema().json())
+
+    def test_schema_declara_corte_de_caja(self):
+        caja = self.get_schema().json()["caja"]
+
+        self.assertEqual(
+            caja["corte_endpoint"],
+            "/api/v1/chremata/cajas/<caja_public_id>/corte/",
+        )
+        self.assertEqual(caja["corte_contract"], "chremata.corte_caja.v1")
+        self.assertIn("totales_por_concepto", caja["fields"])
 
     def test_declara_los_seis_catalogos(self):
         catalogs = self.get_schema().json()["catalogs"]
