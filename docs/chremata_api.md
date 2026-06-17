@@ -126,15 +126,17 @@ Los UUIDs siguientes son ejemplos sin datos reales.
   "operation_contract": "chremata.operation.crear_gasto_material.v1",
   "device_id": "zephyros-cardputer-principal",
   "device_entry_id": "018fca4d-6800-7c20-9c3d-9bbdc43a1abe",
-  "fecha": "2026-06-17T11:00:00-06:00",
-  "monto": "120.00",
-  "descripcion": "Material de curación",
-  "notas": "Compra capturada offline",
-  "caja_public_id": "9b13055e-bd44-47e2-8d19-70fd0a0d0001"
+  "caja_public_id": "9b13055e-bd44-47e2-8d19-70fd0a0d0001",
+  "gasto_material": {
+    "fecha": "2026-06-17T11:00:00-06:00",
+    "monto": "120.00",
+    "descripcion": "Material de curación",
+    "notas": "Compra capturada offline"
+  }
 }
 ```
 
-`crear_gasto_material` registra un gasto económico de material y afecta el material pool. `caja_public_id` es opcional por compatibilidad temporal, pero Zephyros debe enviarlo cuando el gasto ocurre durante una caja abierta.
+`crear_gasto_material` registra un gasto económico de material y afecta el material pool. `caja_public_id` identifica la `CajaSesion`, es opcional por compatibilidad temporal y Zephyros debe enviarlo top-level cuando el gasto ocurre durante una caja abierta. `caja_public_id` no va dentro de `gasto_material`; los campos propios del gasto (`fecha`, `monto`, `descripcion` y `notas`) sí van dentro del objeto top-level `gasto_material`.
 
 
 ### `abrir_caja`
