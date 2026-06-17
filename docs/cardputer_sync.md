@@ -88,7 +88,7 @@ Zephyros debe actualizarse para usar estas rutas nuevas; las rutas locales anter
 | `/sd/zephyros/config.json` | Configuración del dispositivo, como `device_id`, URL local de Archeion y credenciales protegidas según las capacidades del dispositivo. |
 | `/sd/zephyros/chremata/material_pool_snapshot.json` | Último snapshot completo descargado desde `GET /api/v1/catalogos/`. |
 | `/sd/zephyros/chremata/entries_v2.jsonl` | Bitácora append-only de operaciones capturadas localmente, con un objeto JSON por línea. |
-| `/sd/zephyros/chremata/sync_state.jsonl` | Estado mutable de sincronización de cada `device_entry_id`. |
+| `/sd/zephyros/chremata/sync_state.json` | Estado mutable de sincronización de cada `device_entry_id`. |
 
 `material_pool_snapshot.json` debe reemplazarse de forma segura, por ejemplo escribiendo
 primero un archivo temporal completo y después renombrándolo. Una operación ya
@@ -149,7 +149,7 @@ estructura lógica es:
 Los valores calculados por Cardputer son una fotografía útil para auditoría y para
 mostrar resultados offline; no sustituyen los cálculos definitivos de Archeion.
 
-## Formato recomendado de `sync_state.jsonl`
+## Formato recomendado de `sync_state.json`
 
 El estado de sincronización debe almacenarse separado de `entries_v2.jsonl` para mantener
 la bitácora de operaciones append-only. Una estructura inicial sugerida es:
@@ -188,7 +188,7 @@ Campos de seguimiento:
   auxiliar, o `null`.
 - `last_error`: último error útil para diagnóstico, o `null`.
 
-Al escribir `sync_state.jsonl`, Cardputer debe evitar archivos parcialmente escritos;
+Al escribir `sync_state.json`, Cardputer debe evitar archivos parcialmente escritos;
 conviene escribir un archivo temporal completo y renombrarlo de forma atómica cuando
 el sistema de archivos lo permita.
 
