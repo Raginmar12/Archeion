@@ -7,7 +7,7 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
 
     dependencies = [
-        ("ledger", "0005_canal_predeterminado_ingreso_politica"),
+        ("chremata", "0005_canal_predeterminado_ingreso_politica"),
     ]
 
     operations = [

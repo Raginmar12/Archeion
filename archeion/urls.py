@@ -18,7 +18,7 @@ Including another URLconf
 from django.contrib import admin
 from django.urls import path
 
-from ledger.views_api import (
+from chremata.views_api import (
     catalogos,
     chremata_operations,
     chremata_schema,

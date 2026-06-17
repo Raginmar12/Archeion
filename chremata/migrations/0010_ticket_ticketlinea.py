@@ -9,7 +9,7 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
 
     dependencies = [
-        ("ledger", "0009_catalogos_public_id"),
+        ("chremata", "0009_catalogos_public_id"),
     ]
 
     operations = [
@@ -64,7 +64,7 @@ class Migration(migrations.Migration):
                     models.ForeignKey(
                         on_delete=django.db.models.deletion.PROTECT,
                         related_name="tickets",
-                        to="ledger.origeningreso",
+                        to="chremata.origeningreso",
                     ),
                 ),
             ],
@@ -118,7 +118,7 @@ class Migration(migrations.Migration):
                     models.ForeignKey(
                         on_delete=django.db.models.deletion.PROTECT,
                         related_name="ticket_lineas",
-                        to="ledger.conceptoingreso",
+                        to="chremata.conceptoingreso",
                     ),
                 ),
                 (
@@ -126,7 +126,7 @@ class Migration(migrations.Migration):
                     models.ForeignKey(
                         on_delete=django.db.models.deletion.CASCADE,
                         related_name="lineas",
-                        to="ledger.ticket",
+                        to="chremata.ticket",
                     ),
                 ),
             ],

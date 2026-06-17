@@ -6,7 +6,7 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
 
     dependencies = [
-        ("ledger", "0006_gastomaterial_conceptoingreso_incluye_material_and_more"),
+        ("chremata", "0006_gastomaterial_conceptoingreso_incluye_material_and_more"),
     ]
 
     operations = [

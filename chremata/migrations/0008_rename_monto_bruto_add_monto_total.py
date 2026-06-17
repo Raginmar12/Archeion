@@ -5,7 +5,7 @@ from django.db.models import F
 
 
 def completar_monto_total(apps, schema_editor):
-    Ingreso = apps.get_model("ledger", "Ingreso")
+    Ingreso = apps.get_model("chremata", "Ingreso")
     Ingreso.objects.update(
         monto_total=F("monto_procedimiento") + F("monto_material_cobrado"),
     )
@@ -14,7 +14,7 @@ def completar_monto_total(apps, schema_editor):
 class Migration(migrations.Migration):
 
     dependencies = [
-        ("ledger", "0007_rename_incluye_material_and_verbose_names"),
+        ("chremata", "0007_rename_incluye_material_and_verbose_names"),
     ]
 
     operations = [

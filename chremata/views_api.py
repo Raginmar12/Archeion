@@ -255,14 +255,10 @@ def _chremata_operations_schema():
             "future_endpoint": "/api/v1/chremata/operations/",
             "idempotency_key": ["device_id", "device_entry_id"],
             "required_top_level_fields": [
-                "schema_version",
-                "operation_type",
-                "device_entry_id",
+                "operation",
+                "operation_contract",
                 "device_id",
-                "catalog_snapshot_id",
-                "catalog_snapshot_generated_at",
-                "capturado_en_device",
-                "device_timezone",
+                "device_entry_id",
                 "payload",
             ],
             "payload_fields": [

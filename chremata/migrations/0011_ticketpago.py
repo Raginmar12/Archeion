@@ -7,7 +7,7 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
 
     dependencies = [
-        ("ledger", "0010_ticket_ticketlinea"),
+        ("chremata", "0010_ticket_ticketlinea"),
     ]
 
     operations = [
@@ -32,7 +32,7 @@ class Migration(migrations.Migration):
                     models.ForeignKey(
                         on_delete=django.db.models.deletion.PROTECT,
                         related_name="ticket_pagos",
-                        to="ledger.canalcobro",
+                        to="chremata.canalcobro",
                     ),
                 ),
                 (
@@ -40,7 +40,7 @@ class Migration(migrations.Migration):
                     models.ForeignKey(
                         on_delete=django.db.models.deletion.PROTECT,
                         related_name="ticket_pagos",
-                        to="ledger.conceptoingreso",
+                        to="chremata.conceptoingreso",
                     ),
                 ),
                 (
@@ -50,7 +50,7 @@ class Migration(migrations.Migration):
                         null=True,
                         on_delete=django.db.models.deletion.PROTECT,
                         related_name="ticket_pagos",
-                        to="ledger.esquemacomision",
+                        to="chremata.esquemacomision",
                     ),
                 ),
                 (
@@ -58,7 +58,7 @@ class Migration(migrations.Migration):
                     models.OneToOneField(
                         on_delete=django.db.models.deletion.PROTECT,
                         related_name="ticket_pago",
-                        to="ledger.ingreso",
+                        to="chremata.ingreso",
                     ),
                 ),
                 (
@@ -66,7 +66,7 @@ class Migration(migrations.Migration):
                     models.OneToOneField(
                         on_delete=django.db.models.deletion.PROTECT,
                         related_name="pago",
-                        to="ledger.ticket",
+                        to="chremata.ticket",
                     ),
                 ),
             ],

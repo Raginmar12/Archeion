@@ -99,7 +99,7 @@ class CatalogosApiTests(TestCase):
 
         self.assertEqual(response.status_code, 401)
 
-    @patch("ledger.views_api.timezone")
+    @patch("chremata.views_api.timezone")
     def test_devuelve_metadatos_y_catalogos(self, timezone_mock):
         timezone_mock.now.return_value = datetime(
             2026,
@@ -1981,7 +1981,7 @@ class MaterialPoolApiTests(TestCase):
 
         self.assertEqual(response.status_code, 401)
 
-    @patch("ledger.views_api.timezone")
+    @patch("chremata.views_api.timezone")
     def test_respuesta_incluye_metadata_y_campos_requeridos(self, timezone_mock):
         timezone_mock.now.return_value = datetime(
             2026,
@@ -2080,7 +2080,7 @@ class MaterialPoolApiTests(TestCase):
         self.assertEqual(data["total_material_recuperado"], "0.00")
         self.assertEqual(data["pool_material_actual"], "1.50")
 
-    @patch("ledger.views_api.timezone")
+    @patch("chremata.views_api.timezone")
     def test_generated_at_no_tiene_microsegundos_y_usa_z(self, timezone_mock):
         timezone_mock.now.return_value = datetime(
             2026,
@@ -2187,7 +2187,7 @@ class ChremataSchemaApiTests(TestCase):
 
         self.assertEqual(response.status_code, 401)
 
-    @patch("ledger.views_api.timezone")
+    @patch("chremata.views_api.timezone")
     def test_incluye_metadata_y_secciones_principales(self, timezone_mock):
         timezone_mock.now.return_value = datetime(
             2026,
@@ -2617,14 +2617,10 @@ class ChremataSchemaApiTests(TestCase):
         self.assertEqual(
             operations["crear_ingreso"]["required_top_level_fields"],
             [
-                "schema_version",
-                "operation_type",
-                "device_entry_id",
+                "operation",
+                "operation_contract",
                 "device_id",
-                "catalog_snapshot_id",
-                "catalog_snapshot_generated_at",
-                "capturado_en_device",
-                "device_timezone",
+                "device_entry_id",
                 "payload",
             ],
         )

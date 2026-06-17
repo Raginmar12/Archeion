@@ -43,7 +43,7 @@ INSTALLED_APPS = [
 
     #My apps
     "core",
-    "ledger",
+    "chremata",
 ]
 
 MIDDLEWARE = [

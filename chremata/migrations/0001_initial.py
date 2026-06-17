@@ -62,9 +62,9 @@ class Migration(migrations.Migration):
                 ('notas', models.TextField(blank=True)),
                 ('creado_en', models.DateTimeField(auto_now_add=True)),
                 ('actualizado_en', models.DateTimeField(auto_now=True)),
-                ('concepto', models.ForeignKey(on_delete=django.db.models.deletion.PROTECT, related_name='ingresos', to='ledger.conceptoingreso')),
-                ('metodo_pago', models.ForeignKey(on_delete=django.db.models.deletion.PROTECT, related_name='ingresos', to='ledger.metodopago')),
-                ('origen', models.ForeignKey(on_delete=django.db.models.deletion.PROTECT, related_name='ingresos', to='ledger.origeningreso')),
+                ('concepto', models.ForeignKey(on_delete=django.db.models.deletion.PROTECT, related_name='ingresos', to='chremata.conceptoingreso')),
+                ('metodo_pago', models.ForeignKey(on_delete=django.db.models.deletion.PROTECT, related_name='ingresos', to='chremata.metodopago')),
+                ('origen', models.ForeignKey(on_delete=django.db.models.deletion.PROTECT, related_name='ingresos', to='chremata.origeningreso')),
             ],
             options={
                 'verbose_name': 'ingreso',

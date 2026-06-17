@@ -14,7 +14,7 @@ CATALOGOS = (
 
 def poblar_public_ids(apps, schema_editor):
     for nombre_modelo in CATALOGOS:
-        modelo = apps.get_model("ledger", nombre_modelo)
+        modelo = apps.get_model("chremata", nombre_modelo)
         for objeto in modelo.objects.filter(public_id__isnull=True).iterator():
             objeto.public_id = uuid.uuid4()
             objeto.save(update_fields=["public_id"])
@@ -23,7 +23,7 @@ def poblar_public_ids(apps, schema_editor):
 class Migration(migrations.Migration):
 
     dependencies = [
-        ("ledger", "0008_rename_monto_bruto_add_monto_total"),
+        ("chremata", "0008_rename_monto_bruto_add_monto_total"),
     ]
 
     operations = [

@@ -98,7 +98,7 @@ class CatalogosPublicIdTests(TestCase):
                 self.assertIn("public_id", admin.site._registry[modelo].readonly_fields)
 
 
-class LedgerComisionesTests(TestCase):
+class ChremataComisionesTests(TestCase):
     def setUp(self):
         self.metodo_tarjeta = MetodoPago.objects.create(nombre="Tarjeta")
         self.metodo_efectivo = MetodoPago.objects.create(nombre="Efectivo")
@@ -989,3 +989,206 @@ class TicketPagoTests(TestCase):
 
         self.assertIsInstance(campo, models.OneToOneField)
         self.assertTrue(campo.unique)
+
+
+
+class SeedChremataCatalogsCommandTests(TestCase):
+    conceptos_esperados = {
+        "Consulta médica",
+        "Certificado médico",
+        "Oximetría",
+        "Toma de presión arterial",
+        "Aplicación de inyección",
+        "Prueba para detectar niveles de azúcar",
+        "Lavado ótico, cada oído",
+        "Retiro de puntos",
+        "Retiro de sondas",
+        "Extracción de uña enterrada",
+        "Nebulizaciones",
+        "Curación",
+        "Sutura",
+        "Peso, talla, IMC",
+        "Extracción de cuerpo extraño",
+        "Lavado nasal",
+        "Retiro de verrugas",
+        "Colocación y retiro de implante",
+        "Resección de lipoma",
+        "Perforación para colocación de arete",
+        "Otro",
+    }
+    conceptos_obsoletos = {
+        "Control del niño sano",
+        "Control de embarazo",
+        "Planificación familiar",
+    }
+
+    def ejecutar_seed(self, *args):
+        from io import StringIO
+
+        from django.core.management import call_command
+
+        call_command("seed_chremata_catalogs", *args, stdout=StringIO(), verbosity=0)
+
+    def test_seed_completo_crea_catalogos_iniciales(self):
+        self.ejecutar_seed()
+
+        self.assertEqual(MetodoPago.objects.count(), 3)
+        self.assertEqual(EsquemaComision.objects.count(), 2)
+        self.assertEqual(CanalCobro.objects.count(), 4)
+        self.assertEqual(OrigenIngreso.objects.count(), 2)
+        self.assertEqual(ConceptoIngreso.objects.count(), 21)
+        self.assertEqual(
+            set(MetodoPago.objects.values_list("nombre", flat=True)),
+            {"Efectivo", "Tarjeta", "Transferencia"},
+        )
+        self.assertEqual(
+            set(OrigenIngreso.objects.values_list("nombre", flat=True)),
+            {"Similares", "MetaboCare"},
+        )
+
+    def test_seed_completo_crea_exactamente_21_conceptos_activos_esperados(self):
+        self.ejecutar_seed()
+
+        conceptos_activos = set(
+            ConceptoIngreso.objects.filter(activo=True).values_list("nombre", flat=True)
+        )
+        self.assertEqual(conceptos_activos, self.conceptos_esperados)
+        self.assertEqual(ConceptoIngreso.objects.filter(activo=True).count(), 21)
+
+    def test_no_crea_conceptos_obsoletos(self):
+        self.ejecutar_seed()
+
+        self.assertFalse(
+            ConceptoIngreso.objects.filter(nombre__in=self.conceptos_obsoletos).exists()
+        )
+
+    def test_aborta_si_ya_existe_concepto_ingreso(self):
+        from django.core.management.base import CommandError
+
+        ConceptoIngreso.objects.create(nombre="Consulta médica")
+
+        with self.assertRaisesMessage(CommandError, "ConceptoIngreso=1"):
+            self.ejecutar_seed()
+
+        self.assertEqual(ConceptoIngreso.objects.count(), 1)
+        self.assertEqual(MetodoPago.objects.count(), 0)
+
+    def test_aborta_si_existe_catalogo_base(self):
+        from django.core.management.base import CommandError
+
+        casos = [
+            (MetodoPago, {"nombre": "Efectivo"}, "MetodoPago=1"),
+            (
+                EsquemaComision,
+                {"nombre": "Sin comisión", "porcentaje_base": Decimal("0.00")},
+                "EsquemaComision=1",
+            ),
+            (OrigenIngreso, {"nombre": "Similares"}, "OrigenIngreso=1"),
+        ]
+
+        for modelo, kwargs, mensaje in casos:
+            with self.subTest(modelo=modelo.__name__):
+                modelo.objects.create(**kwargs)
+                with self.assertRaisesMessage(CommandError, mensaje):
+                    self.ejecutar_seed()
+                modelo.objects.all().delete()
+
+        metodo = MetodoPago.objects.create(nombre="Tarjeta")
+        CanalCobro.objects.create(nombre="Tap (MP)", metodo_pago=metodo)
+        with self.assertRaisesMessage(CommandError, "MetodoPago=1, CanalCobro=1"):
+            self.ejecutar_seed()
+
+    def test_aborta_si_existe_tabla_operativa(self):
+        from django.core.management.base import CommandError
+
+        GastoMaterial.objects.create(
+            fecha=timezone.now(),
+            monto=Decimal("10.00"),
+            descripcion="Material previo",
+        )
+
+        with self.assertRaisesMessage(CommandError, "GastoMaterial=1"):
+            self.ejecutar_seed()
+
+        self.assertEqual(MetodoPago.objects.count(), 0)
+
+    def test_no_se_bloquea_por_usuarios_ni_tokens_de_dispositivo(self):
+        from django.contrib.auth import get_user_model
+
+        from core.models import DeviceToken
+
+        get_user_model().objects.create_user(username="ramiro")
+        DeviceToken.crear("Zephyros")
+
+        self.ejecutar_seed()
+
+        self.assertEqual(ConceptoIngreso.objects.count(), 21)
+        self.assertEqual(MetodoPago.objects.count(), 3)
+
+    def test_dry_run_valida_base_limpia_y_no_modifica_base(self):
+        self.ejecutar_seed("--dry-run")
+
+        self.assertEqual(MetodoPago.objects.count(), 0)
+        self.assertEqual(EsquemaComision.objects.count(), 0)
+        self.assertEqual(CanalCobro.objects.count(), 0)
+        self.assertEqual(OrigenIngreso.objects.count(), 0)
+        self.assertEqual(ConceptoIngreso.objects.count(), 0)
+
+    def test_dry_run_aborta_si_base_no_esta_limpia(self):
+        from django.core.management.base import CommandError
+
+        ConceptoIngreso.objects.create(nombre="Consulta médica")
+
+        with self.assertRaisesMessage(CommandError, "ConceptoIngreso=1"):
+            self.ejecutar_seed("--dry-run")
+
+    def test_relaciones_metodo_canal_y_esquema_predeterminado(self):
+        self.ejecutar_seed()
+
+        casos = {
+            "Efectivo en caja": ("Efectivo", "Sin comisión"),
+            "SPEI": ("Transferencia", "Sin comisión"),
+            "Tap (MP)": ("Tarjeta", "Mercado Pago 3.5% + IVA"),
+            "Point Air (MP)": ("Tarjeta", "Mercado Pago 3.5% + IVA"),
+        }
+        for canal_nombre, (metodo_nombre, esquema_nombre) in casos.items():
+            with self.subTest(canal=canal_nombre):
+                canal = CanalCobro.objects.select_related(
+                    "metodo_pago",
+                    "esquema_comision_predeterminado",
+                ).get(nombre=canal_nombre)
+                self.assertEqual(canal.metodo_pago.nombre, metodo_nombre)
+                self.assertEqual(
+                    canal.esquema_comision_predeterminado.nombre,
+                    esquema_nombre,
+                )
+
+    def test_relacion_many_to_many_de_esquemas_con_canales(self):
+        self.ejecutar_seed()
+
+        sin_comision = EsquemaComision.objects.get(nombre="Sin comisión")
+        mercado_pago = EsquemaComision.objects.get(nombre="Mercado Pago 3.5% + IVA")
+
+        self.assertEqual(
+            set(sin_comision.canales_cobro.values_list("nombre", flat=True)),
+            {"Efectivo en caja", "SPEI"},
+        )
+        self.assertEqual(
+            set(mercado_pago.canales_cobro.values_list("nombre", flat=True)),
+            {"Tap (MP)", "Point Air (MP)"},
+        )
+
+    def test_esquemas_de_comision_tienen_porcentajes_esperados(self):
+        self.ejecutar_seed()
+
+        sin_comision = EsquemaComision.objects.get(nombre="Sin comisión")
+        mercado_pago = EsquemaComision.objects.get(nombre="Mercado Pago 3.5% + IVA")
+
+        self.assertEqual(sin_comision.porcentaje_base, Decimal("0.0000"))
+        self.assertFalse(sin_comision.cobra_iva)
+        self.assertEqual(sin_comision.porcentaje_iva, Decimal("0.00"))
+        self.assertEqual(sin_comision.porcentaje_total, Decimal("0.0000"))
+        self.assertEqual(mercado_pago.porcentaje_base, Decimal("3.5000"))
+        self.assertTrue(mercado_pago.cobra_iva)
+        self.assertEqual(mercado_pago.porcentaje_iva, Decimal("16.00"))
+        self.assertEqual(mercado_pago.porcentaje_total, Decimal("4.0600"))
