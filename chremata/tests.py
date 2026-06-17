@@ -11,6 +11,8 @@ from django.utils import timezone
 from .services import cobrar_ticket
 
 from .models import (
+    CajaFisica,
+    CajaSesion,
     CanalCobro,
     ConceptoIngreso,
     EsquemaComision,
@@ -24,8 +26,60 @@ from .models import (
 )
 
 
+class CajaTests(TestCase):
+    def test_caja_fisica_se_puede_crear_con_public_id(self):
+        caja = CajaFisica.objects.create(nombre="Caja principal")
+
+        self.assertIsInstance(caja.public_id, UUID)
+        self.assertEqual(str(caja), "Caja principal")
+        self.assertTrue(caja.activa)
+
+    def test_caja_sesion_se_puede_crear_abierta(self):
+        caja = CajaFisica.objects.create(nombre="Caja principal")
+        sesion = CajaSesion.objects.create(
+            device_id="zephyros-cardputer-principal",
+            caja_fisica=caja,
+            abierta_en=timezone.now(),
+            saldo_inicial_efectivo=Decimal("500.00"),
+        )
+
+        self.assertIsInstance(sesion.public_id, UUID)
+        self.assertEqual(sesion.estado, CajaSesion.ESTADO_ABIERTA)
+        self.assertIsNone(sesion.cerrada_en)
+        self.assertEqual(sesion.saldo_inicial_efectivo, Decimal("500.00"))
+
+    def test_caja_sesion_cerrada_requiere_cerrada_en(self):
+        sesion = CajaSesion(
+            device_id="zephyros-cardputer-principal",
+            estado=CajaSesion.ESTADO_CERRADA,
+            abierta_en=timezone.now(),
+        )
+
+        with self.assertRaisesMessage(
+            ValidationError,
+            "Una sesión cerrada debe tener fecha de cierre.",
+        ):
+            sesion.full_clean()
+
+    def test_caja_sesion_cerrada_en_no_puede_ser_anterior_a_abierta_en(self):
+        abierta_en = timezone.now()
+        sesion = CajaSesion(
+            device_id="zephyros-cardputer-principal",
+            abierta_en=abierta_en,
+            cerrada_en=abierta_en - timezone.timedelta(minutes=1),
+        )
+
+        with self.assertRaisesMessage(
+            ValidationError,
+            "La fecha de cierre debe ser mayor o igual que la fecha de apertura.",
+        ):
+            sesion.full_clean()
+
+
 class CatalogosPublicIdTests(TestCase):
     modelos_catalogo = (
+        CajaFisica,
+        CajaSesion,
         MetodoPago,
         CanalCobro,
         EsquemaComision,
@@ -991,7 +1045,6 @@ class TicketPagoTests(TestCase):
         self.assertTrue(campo.unique)
 
 
-
 class SeedChremataCatalogsCommandTests(TestCase):
     conceptos_esperados = {
         "Consulta médica",
@@ -1032,11 +1085,17 @@ class SeedChremataCatalogsCommandTests(TestCase):
     def test_seed_completo_crea_catalogos_iniciales(self):
         self.ejecutar_seed()
 
+        self.assertEqual(CajaFisica.objects.count(), 1)
         self.assertEqual(MetodoPago.objects.count(), 3)
         self.assertEqual(EsquemaComision.objects.count(), 2)
         self.assertEqual(CanalCobro.objects.count(), 4)
         self.assertEqual(OrigenIngreso.objects.count(), 2)
         self.assertEqual(ConceptoIngreso.objects.count(), 21)
+        self.assertEqual(CajaFisica.objects.get().nombre, "Caja principal")
+        self.assertEqual(
+            CajaFisica.objects.get().descripcion,
+            "Caja física principal de efectivo.",
+        )
         self.assertEqual(
             set(MetodoPago.objects.values_list("nombre", flat=True)),
             {"Efectivo", "Tarjeta", "Transferencia"},
@@ -1071,6 +1130,31 @@ class SeedChremataCatalogsCommandTests(TestCase):
             self.ejecutar_seed()
 
         self.assertEqual(ConceptoIngreso.objects.count(), 1)
+        self.assertEqual(MetodoPago.objects.count(), 0)
+
+    def test_aborta_si_ya_existe_caja_fisica(self):
+        from django.core.management.base import CommandError
+
+        CajaFisica.objects.create(nombre="Caja previa")
+
+        with self.assertRaisesMessage(CommandError, "CajaFisica=1"):
+            self.ejecutar_seed()
+
+        self.assertEqual(CajaFisica.objects.count(), 1)
+        self.assertEqual(MetodoPago.objects.count(), 0)
+
+    def test_aborta_si_ya_existe_caja_sesion(self):
+        from django.core.management.base import CommandError
+
+        CajaSesion.objects.create(
+            device_id="zephyros-cardputer-principal",
+            abierta_en=timezone.now(),
+        )
+
+        with self.assertRaisesMessage(CommandError, "CajaSesion=1"):
+            self.ejecutar_seed()
+
+        self.assertEqual(CajaSesion.objects.count(), 1)
         self.assertEqual(MetodoPago.objects.count(), 0)
 
     def test_aborta_si_existe_catalogo_base(self):
@@ -1128,6 +1212,7 @@ class SeedChremataCatalogsCommandTests(TestCase):
     def test_dry_run_valida_base_limpia_y_no_modifica_base(self):
         self.ejecutar_seed("--dry-run")
 
+        self.assertEqual(CajaFisica.objects.count(), 0)
         self.assertEqual(MetodoPago.objects.count(), 0)
         self.assertEqual(EsquemaComision.objects.count(), 0)
         self.assertEqual(CanalCobro.objects.count(), 0)

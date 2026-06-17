@@ -5,6 +5,8 @@ from django.core.management.base import BaseCommand, CommandError
 from django.db import transaction
 
 from chremata.models import (
+    CajaFisica,
+    CajaSesion,
     CanalCobro,
     ConceptoIngreso,
     EsquemaComision,
@@ -18,6 +20,14 @@ from chremata.models import (
     TicketPago,
 )
 
+
+CAJAS_FISICAS = [
+    {
+        "clave": "caja-principal",
+        "nombre": "Caja principal",
+        "descripcion": "Caja física principal de efectivo.",
+    },
+]
 
 METODOS_PAGO = [
     {"clave": "efectivo", "nombre": "Efectivo"},
@@ -204,6 +214,8 @@ CATALOGO_CONCEPTOS_INGRESO = [
 ]
 
 MODELOS_CHREMATA_BASE_LIMPIA = [
+    CajaFisica,
+    CajaSesion,
     MetodoPago,
     CanalCobro,
     EsquemaComision,
@@ -246,6 +258,7 @@ class Command(BaseCommand):
         self._validar_base_limpia()
 
         resumen = {
+            "cajas_fisicas": len(CAJAS_FISICAS),
             "metodos_pago": len(METODOS_PAGO),
             "esquemas_comision": len(ESQUEMAS_COMISION),
             "canales_cobro": len(CANALES_COBRO),
@@ -277,6 +290,14 @@ class Command(BaseCommand):
             )
 
     def _crear_catalogos(self):
+        for caja in CAJAS_FISICAS:
+            CajaFisica.objects.create(
+                public_id=calcular_public_id("cajas-fisicas", caja["clave"]),
+                nombre=caja["nombre"],
+                descripcion=caja["descripcion"],
+                activa=True,
+            )
+
         metodos = {}
         for metodo in METODOS_PAGO:
             metodos[metodo["nombre"]] = MetodoPago.objects.create(
@@ -332,6 +353,7 @@ class Command(BaseCommand):
         self.stdout.write(
             self.style.SUCCESS(
                 f"{prefijo}: "
+                f"{resumen['cajas_fisicas']} cajas físicas, "
                 f"{resumen['metodos_pago']} métodos de pago, "
                 f"{resumen['esquemas_comision']} esquemas de comisión, "
                 f"{resumen['canales_cobro']} canales de cobro, "

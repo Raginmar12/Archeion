@@ -10,6 +10,7 @@ from django.urls import reverse
 from core.models import DeviceToken
 
 from .models import (
+    CajaFisica,
     CanalCobro,
     ConceptoIngreso,
     EsquemaComision,
@@ -82,6 +83,14 @@ class CatalogosApiTests(TestCase):
             nombre="Origen inactivo",
             activo=False,
         )
+        self.caja_fisica = CajaFisica.objects.create(
+            nombre="Caja principal",
+            descripcion="Caja física principal de efectivo.",
+        )
+        self.caja_fisica_inactiva = CajaFisica.objects.create(
+            nombre="Caja inactiva",
+            activa=False,
+        )
 
     def get_catalogos(self):
         return self.client.get(
@@ -123,6 +132,7 @@ class CatalogosApiTests(TestCase):
         self.assertEqual(
             set(data["catalogs"]),
             {
+                "cajas_fisicas",
                 "metodos_pago",
                 "canales_cobro",
                 "esquemas_comision",
@@ -134,6 +144,10 @@ class CatalogosApiTests(TestCase):
     def test_devuelve_catalogos_activos_y_excluye_inactivos(self):
         catalogs = self.get_catalogos().json()["catalogs"]
 
+        self.assertEqual(
+            {item["nombre"] for item in catalogs["cajas_fisicas"]},
+            {self.caja_fisica.nombre},
+        )
         self.assertEqual(
             {item["nombre"] for item in catalogs["metodos_pago"]},
             {self.metodo.nombre},
@@ -156,6 +170,7 @@ class CatalogosApiTests(TestCase):
         )
 
     def test_catalogos_y_canales_de_esquemas_tienen_orden_estable(self):
+        caja_alfabetica = CajaFisica.objects.create(nombre="A caja")
         metodo_alfabetico = MetodoPago.objects.create(nombre="A método")
         canal_alfabetico = CanalCobro.objects.create(
             nombre="A canal",
@@ -171,6 +186,10 @@ class CatalogosApiTests(TestCase):
 
         catalogs = self.get_catalogos().json()["catalogs"]
 
+        self.assertEqual(
+            [item["id"] for item in catalogs["cajas_fisicas"]],
+            [caja_alfabetica.id, self.caja_fisica.id],
+        )
         self.assertEqual(
             [item["id"] for item in catalogs["metodos_pago"]],
             [metodo_alfabetico.id, self.metodo.id],
@@ -221,6 +240,14 @@ class CatalogosApiTests(TestCase):
                 for item in items:
                     self.assertIsInstance(item["public_id"], str)
                     UUID(item["public_id"])
+
+    def test_cajas_fisicas_incluyen_campos_operativos(self):
+        cajas = self.get_catalogos().json()["catalogs"]["cajas_fisicas"]
+        caja = cajas[0]
+
+        self.assertEqual(caja["nombre"], "Caja principal")
+        self.assertEqual(caja["descripcion"], "Caja física principal de efectivo.")
+        self.assertTrue(caja["activa"])
 
     def test_canales_incluyen_datos_del_metodo_pago(self):
         canales = self.get_catalogos().json()["catalogs"]["canales_cobro"]
@@ -2492,12 +2519,13 @@ class ChremataSchemaApiTests(TestCase):
     def test_schema_sigue_declarando_material_pool(self):
         self.assertIn("material_pool", self.get_schema().json())
 
-    def test_declara_los_cinco_catalogos(self):
+    def test_declara_los_seis_catalogos(self):
         catalogs = self.get_schema().json()["catalogs"]
 
         self.assertEqual(
             set(catalogs),
             {
+                "cajas_fisicas",
                 "metodos_pago",
                 "canales_cobro",
                 "esquemas_comision",
@@ -2511,6 +2539,10 @@ class ChremataSchemaApiTests(TestCase):
     def test_declara_campos_de_catalogos_y_relaciones_por_public_id(self):
         data = self.get_schema().json()
 
+        self.assertEqual(
+            self.catalog_field_names(data, "cajas_fisicas"),
+            {"public_id", "nombre", "descripcion", "activa"},
+        )
         self.assertEqual(
             self.catalog_field_names(data, "metodos_pago"),
             {"public_id", "nombre"},

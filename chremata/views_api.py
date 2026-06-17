@@ -9,6 +9,7 @@ from django.views.decorators.http import require_GET, require_POST
 
 from .operations import OperationValidationError, procesar_operacion_chremata
 from .models import (
+    CajaFisica,
     CanalCobro,
     ConceptoIngreso,
     EsquemaComision,
@@ -51,6 +52,15 @@ def _campo_schema(nombre, tipo, required=True, **extra):
 
 def _chremata_catalogs_schema():
     return {
+        "cajas_fisicas": {
+            "identity": "public_id",
+            "fields": [
+                _campo_schema("public_id", "uuid"),
+                _campo_schema("nombre", "string"),
+                _campo_schema("descripcion", "string", required=False),
+                _campo_schema("activa", "boolean"),
+            ],
+        },
         "metodos_pago": {
             "identity": "public_id",
             "fields": [
@@ -415,6 +425,16 @@ def _chremata_operations_schema():
     return operaciones
 
 
+def _serializar_caja_fisica(caja):
+    return {
+        "id": caja.id,
+        "public_id": str(caja.public_id),
+        "nombre": caja.nombre,
+        "descripcion": caja.descripcion,
+        "activa": caja.activa,
+    }
+
+
 def _serializar_metodo_pago(metodo):
     return {
         "id": metodo.id,
@@ -571,6 +591,7 @@ def material_pool(request):
 def catalogos(request):
     generated_at_iso = _generated_at_iso()
 
+    cajas_fisicas = CajaFisica.objects.filter(activa=True).order_by("nombre", "id")
     metodos_pago = MetodoPago.objects.filter(activo=True).order_by("nombre", "id")
     canales_cobro = (
         CanalCobro.objects.filter(activo=True)
@@ -611,6 +632,9 @@ def catalogos(request):
             "snapshot_id": f"cat_{generated_at_iso}",
             "generated_at": generated_at_iso,
             "catalogs": {
+                "cajas_fisicas": [
+                    _serializar_caja_fisica(item) for item in cajas_fisicas
+                ],
                 "metodos_pago": [
                     _serializar_metodo_pago(item) for item in metodos_pago
                 ],

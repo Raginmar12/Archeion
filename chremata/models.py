@@ -2,6 +2,7 @@ import uuid
 from decimal import Decimal, ROUND_HALF_UP
 
 from django.core.exceptions import ValidationError
+from django.utils import timezone
 from django.db import models
 from django.db.models import Sum
 
@@ -32,6 +33,134 @@ CAMPOS_CALCULADOS_MATERIAL = {
     "pool_material_antes",
     "pool_material_despues",
 }
+
+
+class CajaFisica(models.Model):
+    public_id = models.UUIDField(default=uuid.uuid4, unique=True, editable=False)
+    nombre = models.CharField(max_length=100, unique=True)
+    descripcion = models.TextField(blank=True)
+    activa = models.BooleanField(default=True)
+    notas = models.TextField(blank=True)
+    creado_en = models.DateTimeField(auto_now_add=True)
+    actualizado_en = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["nombre"]
+        verbose_name = "caja física"
+        verbose_name_plural = "cajas físicas"
+
+    def __str__(self):
+        return self.nombre
+
+
+class CajaSesion(models.Model):
+    ESTADO_ABIERTA = "abierta"
+    ESTADO_CERRADA = "cerrada"
+
+    ESTADOS = (
+        (ESTADO_ABIERTA, "abierta"),
+        (ESTADO_CERRADA, "cerrada"),
+    )
+
+    public_id = models.UUIDField(default=uuid.uuid4, unique=True, editable=False)
+    device_id = models.CharField(max_length=100)
+    caja_fisica = models.ForeignKey(
+        CajaFisica,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="sesiones",
+    )
+    estado = models.CharField(
+        max_length=20,
+        choices=ESTADOS,
+        default=ESTADO_ABIERTA,
+    )
+    abierta_en = models.DateTimeField()
+    cerrada_en = models.DateTimeField(null=True, blank=True)
+    saldo_inicial_efectivo = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        default=Decimal("0.00"),
+    )
+    efectivo_contado_cierre = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        null=True,
+        blank=True,
+    )
+    efectivo_esperado = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        default=Decimal("0.00"),
+    )
+    diferencia_efectivo = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        default=Decimal("0.00"),
+    )
+    total_efectivo = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        default=Decimal("0.00"),
+    )
+    total_tarjeta = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        default=Decimal("0.00"),
+    )
+    total_transferencia = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        default=Decimal("0.00"),
+    )
+    total_bruto = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        default=Decimal("0.00"),
+    )
+    total_material_cobrado = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        default=Decimal("0.00"),
+    )
+    total_comisiones = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        default=Decimal("0.00"),
+    )
+    total_neto_estimado = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        default=Decimal("0.00"),
+    )
+    resumen_snapshot = models.JSONField(default=dict, blank=True)
+    notas_apertura = models.TextField(blank=True)
+    notas_cierre = models.TextField(blank=True)
+    creado_en = models.DateTimeField(auto_now_add=True)
+    actualizado_en = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-abierta_en"]
+        verbose_name = "sesión de caja"
+        verbose_name_plural = "sesiones de caja"
+
+    def __str__(self):
+        caja = self.caja_fisica.nombre if self.caja_fisica_id else "sin caja física"
+        abierta = timezone.localtime(self.abierta_en).strftime("%Y-%m-%d %H:%M")
+        return f"{self.estado} - {caja} - {abierta}"
+
+    def clean(self):
+        super().clean()
+        errores = {}
+        if self.estado == self.ESTADO_CERRADA and not self.cerrada_en:
+            errores["cerrada_en"] = "Una sesión cerrada debe tener fecha de cierre."
+        if self.cerrada_en and self.abierta_en and self.cerrada_en < self.abierta_en:
+            errores["cerrada_en"] = (
+                "La fecha de cierre debe ser mayor o igual que la fecha de apertura."
+            )
+        if errores:
+            raise ValidationError(errores)
 
 
 class ConceptoIngreso(models.Model):

@@ -1,6 +1,8 @@
 from django.contrib import admin
 
 from .models import (
+    CajaFisica,
+    CajaSesion,
     CanalCobro,
     ConceptoIngreso,
     EsquemaComision,
@@ -12,6 +14,38 @@ from .models import (
     TicketLinea,
     TicketPago,
 )
+
+
+@admin.register(CajaFisica)
+class CajaFisicaAdmin(admin.ModelAdmin):
+    readonly_fields = ("public_id",)
+    list_display = ("nombre", "activa", "actualizado_en")
+    search_fields = ("nombre", "descripcion", "notas")
+    list_filter = ("activa",)
+
+
+@admin.register(CajaSesion)
+class CajaSesionAdmin(admin.ModelAdmin):
+    readonly_fields = ("public_id",)
+    list_display = (
+        "public_id",
+        "device_id",
+        "caja_fisica",
+        "estado",
+        "abierta_en",
+        "cerrada_en",
+        "total_bruto",
+        "diferencia_efectivo",
+    )
+    search_fields = (
+        "public_id",
+        "device_id",
+        "caja_fisica__nombre",
+        "notas_apertura",
+        "notas_cierre",
+    )
+    list_filter = ("estado", "caja_fisica", "abierta_en", "cerrada_en")
+    date_hierarchy = "abierta_en"
 
 
 @admin.register(ConceptoIngreso)
