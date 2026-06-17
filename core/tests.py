@@ -17,7 +17,7 @@ class DeviceTokenModelTests(TestCase):
         device_token, token_completo = DeviceToken.crear("Cardputer principal")
 
         token_urlsafe.assert_called_once_with(32)
-        self.assertEqual(token_completo, "codexhub_secreto-prueba-muy-largo-para-prefijo")
+        self.assertEqual(token_completo, "archeion_secreto-prueba-muy-largo-para-prefijo")
         self.assertEqual(device_token.token_hash, DeviceToken.calcular_hash(token_completo))
         self.assertNotEqual(device_token.token_hash, token_completo)
         self.assertEqual(device_token.prefijo, token_completo[:24])
@@ -36,7 +36,7 @@ class CrearDeviceTokenCommandTests(TestCase):
             stdout=salida,
         )
 
-        token_completo = "codexhub_secreto-comando"
+        token_completo = "archeion_secreto-comando"
         device_token = DeviceToken.objects.get(nombre="Cardputer principal")
         self.assertEqual(device_token.notas, "Cardputer Adv")
         self.assertEqual(device_token.token_hash, DeviceToken.calcular_hash(token_completo))
@@ -69,53 +69,53 @@ class DeviceTokenAdminTests(TestCase):
 
 
 class DeviceTokenMiddlewareTests(TestCase):
-    @override_settings(DEBUG=False, CODEX_DEVICE_TOKEN="fallback-no-debe-usarse")
+    @override_settings(DEBUG=False, ARCHEION_DEVICE_TOKEN="fallback-no-debe-usarse")
     def test_token_valido_de_base_de_datos_permite_api_y_actualiza_ultimo_uso(self):
         device_token, token_completo = DeviceToken.crear("Cardputer principal")
 
         response = self.client.get(
             reverse("device-ping"),
-            headers={"X-Codex-Device-Token": token_completo},
+            headers={"X-Archeion-Device-Token": token_completo},
         )
 
         self.assertEqual(response.status_code, 200)
         device_token.refresh_from_db()
         self.assertIsNotNone(device_token.ultimo_uso_en)
 
-    @override_settings(DEBUG=False, CODEX_DEVICE_TOKEN="fallback-no-debe-usarse")
+    @override_settings(DEBUG=False, ARCHEION_DEVICE_TOKEN="fallback-no-debe-usarse")
     def test_token_valido_de_base_de_datos_permite_post_sin_csrf(self):
         _, token_completo = DeviceToken.crear("Módulo de avisos")
 
         response = self.client.post(
             reverse("device-ping"),
-            headers={"X-Codex-Device-Token": token_completo},
+            headers={"X-Archeion-Device-Token": token_completo},
         )
 
         self.assertEqual(response.status_code, 200)
 
-    @override_settings(DEBUG=False, CODEX_DEVICE_TOKEN="fallback-no-debe-usarse")
+    @override_settings(DEBUG=False, ARCHEION_DEVICE_TOKEN="fallback-no-debe-usarse")
     def test_fallback_no_se_acepta_si_hay_tokens_activos(self):
         DeviceToken.crear("Cardputer principal")
 
         response = self.client.get(
             reverse("device-ping"),
-            headers={"X-Codex-Device-Token": "fallback-no-debe-usarse"},
+            headers={"X-Archeion-Device-Token": "fallback-no-debe-usarse"},
         )
 
         self.assertEqual(response.status_code, 401)
 
-    @override_settings(DEBUG=True, CODEX_DEVICE_TOKEN="")
+    @override_settings(DEBUG=True, ARCHEION_DEVICE_TOKEN="")
     def test_token_invalido_responde_401_si_hay_tokens_activos(self):
         DeviceToken.crear("Cardputer principal")
 
         response = self.client.get(
             reverse("device-ping"),
-            headers={"X-Codex-Device-Token": "incorrecto"},
+            headers={"X-Archeion-Device-Token": "incorrecto"},
         )
 
         self.assertEqual(response.status_code, 401)
 
-    @override_settings(DEBUG=True, CODEX_DEVICE_TOKEN="")
+    @override_settings(DEBUG=True, ARCHEION_DEVICE_TOKEN="")
     def test_token_ausente_responde_401_si_hay_tokens_activos(self):
         DeviceToken.crear("Cardputer principal")
 
@@ -123,7 +123,7 @@ class DeviceTokenMiddlewareTests(TestCase):
 
         self.assertEqual(response.status_code, 401)
 
-    @override_settings(DEBUG=False, CODEX_DEVICE_TOKEN="")
+    @override_settings(DEBUG=False, ARCHEION_DEVICE_TOKEN="")
     def test_token_inactivo_responde_401_si_hay_otro_token_activo(self):
         token_inactivo, token_completo_inactivo = DeviceToken.crear("Cardputer respaldo")
         token_inactivo.activo = False
@@ -132,12 +132,12 @@ class DeviceTokenMiddlewareTests(TestCase):
 
         response = self.client.get(
             reverse("device-ping"),
-            headers={"X-Codex-Device-Token": token_completo_inactivo},
+            headers={"X-Archeion-Device-Token": token_completo_inactivo},
         )
 
         self.assertEqual(response.status_code, 401)
 
-    @override_settings(DEBUG=False, CODEX_DEVICE_TOKEN="token-fallback")
+    @override_settings(DEBUG=False, ARCHEION_DEVICE_TOKEN="token-fallback")
     def test_sin_tokens_activos_fallback_global_sigue_funcionando(self):
         token_inactivo, _ = DeviceToken.crear("Cardputer respaldo")
         token_inactivo.activo = False
@@ -145,18 +145,18 @@ class DeviceTokenMiddlewareTests(TestCase):
 
         response = self.client.get(
             reverse("device-ping"),
-            headers={"X-Codex-Device-Token": "token-fallback"},
+            headers={"X-Archeion-Device-Token": "token-fallback"},
         )
 
         self.assertEqual(response.status_code, 200)
 
-    @override_settings(DEBUG=True, CODEX_DEVICE_TOKEN="")
+    @override_settings(DEBUG=True, ARCHEION_DEVICE_TOKEN="")
     def test_sin_tokens_activos_ni_fallback_debug_permite_api(self):
         response = self.client.get(reverse("device-ping"))
 
         self.assertEqual(response.status_code, 200)
 
-    @override_settings(DEBUG=False, CODEX_DEVICE_TOKEN="")
+    @override_settings(DEBUG=False, ARCHEION_DEVICE_TOKEN="")
     def test_sin_tokens_activos_ni_fallback_produccion_responde_503(self):
         response = self.client.get(reverse("device-ping"))
 
