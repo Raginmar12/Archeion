@@ -9,7 +9,11 @@ from django.urls import reverse
 
 from core.models import DeviceToken
 
+from .services import calcular_corte_caja, cobrar_ticket
+
 from .models import (
+    CajaFisica,
+    CajaSesion,
     CanalCobro,
     ConceptoIngreso,
     EsquemaComision,
@@ -82,6 +86,14 @@ class CatalogosApiTests(TestCase):
             nombre="Origen inactivo",
             activo=False,
         )
+        self.caja_fisica = CajaFisica.objects.create(
+            nombre="Caja principal",
+            descripcion="Caja física principal de efectivo.",
+        )
+        self.caja_fisica_inactiva = CajaFisica.objects.create(
+            nombre="Caja inactiva",
+            activa=False,
+        )
 
     def get_catalogos(self):
         return self.client.get(
@@ -123,6 +135,7 @@ class CatalogosApiTests(TestCase):
         self.assertEqual(
             set(data["catalogs"]),
             {
+                "cajas_fisicas",
                 "metodos_pago",
                 "canales_cobro",
                 "esquemas_comision",
@@ -134,6 +147,10 @@ class CatalogosApiTests(TestCase):
     def test_devuelve_catalogos_activos_y_excluye_inactivos(self):
         catalogs = self.get_catalogos().json()["catalogs"]
 
+        self.assertEqual(
+            {item["nombre"] for item in catalogs["cajas_fisicas"]},
+            {self.caja_fisica.nombre},
+        )
         self.assertEqual(
             {item["nombre"] for item in catalogs["metodos_pago"]},
             {self.metodo.nombre},
@@ -156,6 +173,7 @@ class CatalogosApiTests(TestCase):
         )
 
     def test_catalogos_y_canales_de_esquemas_tienen_orden_estable(self):
+        caja_alfabetica = CajaFisica.objects.create(nombre="A caja")
         metodo_alfabetico = MetodoPago.objects.create(nombre="A método")
         canal_alfabetico = CanalCobro.objects.create(
             nombre="A canal",
@@ -171,6 +189,10 @@ class CatalogosApiTests(TestCase):
 
         catalogs = self.get_catalogos().json()["catalogs"]
 
+        self.assertEqual(
+            [item["id"] for item in catalogs["cajas_fisicas"]],
+            [caja_alfabetica.id, self.caja_fisica.id],
+        )
         self.assertEqual(
             [item["id"] for item in catalogs["metodos_pago"]],
             [metodo_alfabetico.id, self.metodo.id],
@@ -221,6 +243,14 @@ class CatalogosApiTests(TestCase):
                 for item in items:
                     self.assertIsInstance(item["public_id"], str)
                     UUID(item["public_id"])
+
+    def test_cajas_fisicas_incluyen_campos_operativos(self):
+        cajas = self.get_catalogos().json()["catalogs"]["cajas_fisicas"]
+        caja = cajas[0]
+
+        self.assertEqual(caja["nombre"], "Caja principal")
+        self.assertEqual(caja["descripcion"], "Caja física principal de efectivo.")
+        self.assertTrue(caja["activa"])
 
     def test_canales_incluyen_datos_del_metodo_pago(self):
         canales = self.get_catalogos().json()["catalogs"]["canales_cobro"]
@@ -358,6 +388,50 @@ class ChremataOperationsApiTests(TestCase):
             )
         ticket.refresh_from_db()
         return ticket
+
+    def crear_caja_sesion_abierta(self, *, device_id="zephyros-cardputer"):
+        return CajaSesion.objects.create(
+            device_id=device_id,
+            abierta_en=datetime(2026, 6, 18, 4, 30, tzinfo=datetime_timezone.utc),
+            saldo_inicial_efectivo=Decimal("500.00"),
+        )
+
+    def crear_caja_sesion_cerrada(self, *, device_id="zephyros-cardputer"):
+        return CajaSesion.objects.create(
+            device_id=device_id,
+            estado=CajaSesion.ESTADO_CERRADA,
+            abierta_en=datetime(2026, 6, 18, 4, 30, tzinfo=datetime_timezone.utc),
+            cerrada_en=datetime(2026, 6, 18, 7, 15, tzinfo=datetime_timezone.utc),
+        )
+
+    def payload_abrir_caja(self, **overrides):
+        payload = {
+            "operation": "abrir_caja",
+            "operation_contract": "chremata.operation.abrir_caja.v1",
+            "device_id": "zephyros-cardputer",
+            "device_entry_id": str(uuid4()),
+            "caja_public_id": str(uuid4()),
+            "caja_fisica_public_id": None,
+            "abierta_en": "2026-06-18T04:30:00Z",
+            "saldo_inicial_efectivo": "500.00",
+            "notas_apertura": "Inicio de jornada",
+        }
+        payload.update(overrides)
+        return payload
+
+    def payload_cerrar_caja(self, caja, **overrides):
+        payload = {
+            "operation": "cerrar_caja",
+            "operation_contract": "chremata.operation.cerrar_caja.v1",
+            "device_id": caja.device_id,
+            "device_entry_id": str(uuid4()),
+            "caja_public_id": str(caja.public_id),
+            "cerrada_en": "2026-06-18T07:15:00Z",
+            "efectivo_contado_cierre": "1250.00",
+            "notas_cierre": "Cierre offline",
+        }
+        payload.update(overrides)
+        return payload
 
     def payload_cobrar_ticket(self, ticket, **overrides):
         payload = {
@@ -777,6 +851,195 @@ class ChremataOperationsApiTests(TestCase):
         )
         self.assertEqual(OperacionDispositivoChremata.objects.count(), 1)
 
+    def test_abrir_caja_crea_caja_sesion_abierta(self):
+        payload = self.payload_abrir_caja()
+
+        response = self.post_operation(payload)
+
+        self.assertEqual(response.status_code, 200)
+        caja = CajaSesion.objects.get()
+        self.assertEqual(caja.public_id, UUID(payload["caja_public_id"]))
+        self.assertEqual(caja.estado, CajaSesion.ESTADO_ABIERTA)
+        self.assertEqual(caja.device_id, "zephyros-cardputer")
+        self.assertEqual(caja.saldo_inicial_efectivo, Decimal("500.00"))
+        self.assertEqual(caja.notas_apertura, "Inicio de jornada")
+        self.assertEqual(response.json()["result"]["estado"], CajaSesion.ESTADO_ABIERTA)
+        self.assertEqual(
+            response.json()["result"]["saldo_inicial_efectivo"],
+            "500.00",
+        )
+
+    def test_abrir_caja_con_caja_fisica_valida_asocia_caja_fisica(self):
+        caja_fisica = CajaFisica.objects.create(nombre="Caja principal")
+        payload = self.payload_abrir_caja(
+            caja_fisica_public_id=str(caja_fisica.public_id),
+        )
+
+        response = self.post_operation(payload)
+
+        self.assertEqual(response.status_code, 200)
+        caja = CajaSesion.objects.select_related("caja_fisica").get()
+        self.assertEqual(caja.caja_fisica, caja_fisica)
+        self.assertEqual(
+            response.json()["result"]["caja_fisica"],
+            {
+                "public_id": str(caja_fisica.public_id),
+                "nombre": "Caja principal",
+            },
+        )
+
+    def test_abrir_caja_falla_si_caja_fisica_no_existe(self):
+        payload = self.payload_abrir_caja(caja_fisica_public_id=str(uuid4()))
+
+        response = self.post_operation(payload)
+
+        self.assertEqual(response.status_code, 422)
+        self.assertEqual(response.json()["error"]["code"], "reference_not_found")
+        self.assertEqual(CajaSesion.objects.count(), 0)
+
+    def test_abrir_caja_falla_si_saldo_inicial_es_negativo(self):
+        payload = self.payload_abrir_caja(saldo_inicial_efectivo="-1.00")
+
+        response = self.post_operation(payload)
+
+        self.assertEqual(response.status_code, 422)
+        self.assertEqual(response.json()["error"]["code"], "business_validation_error")
+        self.assertEqual(CajaSesion.objects.count(), 0)
+
+    def test_abrir_caja_falla_si_ya_hay_caja_abierta_para_device_id(self):
+        CajaSesion.objects.create(
+            device_id="zephyros-cardputer",
+            abierta_en=datetime(2026, 6, 18, 3, 0, tzinfo=datetime_timezone.utc),
+        )
+        payload = self.payload_abrir_caja()
+
+        response = self.post_operation(payload)
+
+        self.assertEqual(response.status_code, 422)
+        self.assertEqual(response.json()["error"]["code"], "caja_abierta_exists")
+        self.assertEqual(CajaSesion.objects.count(), 1)
+
+    def test_abrir_caja_es_idempotente_con_mismo_payload(self):
+        payload = self.payload_abrir_caja()
+
+        primera = self.post_operation(payload)
+        segunda = self.post_operation(payload)
+
+        self.assertEqual(primera.status_code, 200)
+        self.assertEqual(segunda.status_code, 200)
+        self.assertFalse(primera.json()["duplicate"])
+        self.assertTrue(segunda.json()["duplicate"])
+        self.assertEqual(CajaSesion.objects.count(), 1)
+
+    def test_abrir_caja_conflicto_con_misma_llave_payload_distinto(self):
+        payload = self.payload_abrir_caja()
+        conflictivo = dict(payload)
+        conflictivo["saldo_inicial_efectivo"] = "600.00"
+
+        primera = self.post_operation(payload)
+        segunda = self.post_operation(conflictivo)
+
+        self.assertEqual(primera.status_code, 200)
+        self.assertEqual(segunda.status_code, 409)
+        self.assertEqual(segunda.json()["error"]["code"], "payload_conflict")
+        self.assertEqual(CajaSesion.objects.count(), 1)
+
+    def test_cerrar_caja_cierra_caja_sesion_abierta(self):
+        caja = CajaSesion.objects.create(
+            device_id="zephyros-cardputer",
+            abierta_en=datetime(2026, 6, 18, 4, 30, tzinfo=datetime_timezone.utc),
+            saldo_inicial_efectivo=Decimal("500.00"),
+        )
+        payload = self.payload_cerrar_caja(caja)
+
+        response = self.post_operation(payload)
+
+        self.assertEqual(response.status_code, 200)
+        caja.refresh_from_db()
+        self.assertEqual(caja.estado, CajaSesion.ESTADO_CERRADA)
+        self.assertEqual(caja.efectivo_contado_cierre, Decimal("1250.00"))
+        self.assertEqual(caja.notas_cierre, "Cierre offline")
+        self.assertEqual(response.json()["result"]["estado"], CajaSesion.ESTADO_CERRADA)
+
+    def test_cerrar_caja_calcula_efectivo_esperado_y_diferencia(self):
+        caja = CajaSesion.objects.create(
+            device_id="zephyros-cardputer",
+            abierta_en=datetime(2026, 6, 18, 4, 30, tzinfo=datetime_timezone.utc),
+            saldo_inicial_efectivo=Decimal("500.00"),
+        )
+
+        response = self.post_operation(self.payload_cerrar_caja(caja))
+
+        self.assertEqual(response.status_code, 200)
+        caja.refresh_from_db()
+        self.assertEqual(caja.total_efectivo, Decimal("0.00"))
+        self.assertEqual(caja.total_tarjeta, Decimal("0.00"))
+        self.assertEqual(caja.total_transferencia, Decimal("0.00"))
+        self.assertEqual(caja.total_bruto, Decimal("0.00"))
+        self.assertEqual(caja.total_material_cobrado, Decimal("0.00"))
+        self.assertEqual(caja.total_comisiones, Decimal("0.00"))
+        self.assertEqual(caja.total_neto_estimado, Decimal("0.00"))
+        self.assertEqual(caja.efectivo_esperado, Decimal("500.00"))
+        self.assertEqual(caja.diferencia_efectivo, Decimal("750.00"))
+        self.assertEqual(caja.resumen_snapshot["contract"], "chremata.corte_caja.v1")
+        self.assertEqual(
+            caja.resumen_snapshot["efectivo"]["diferencia_efectivo"],
+            "750.00",
+        )
+
+    def test_cerrar_caja_falla_si_caja_no_existe(self):
+        caja = CajaSesion(
+            public_id=uuid4(),
+            device_id="zephyros-cardputer",
+            abierta_en=datetime(2026, 6, 18, 4, 30, tzinfo=datetime_timezone.utc),
+        )
+
+        response = self.post_operation(self.payload_cerrar_caja(caja))
+
+        self.assertEqual(response.status_code, 422)
+        self.assertEqual(response.json()["error"]["code"], "reference_not_found")
+
+    def test_cerrar_caja_falla_si_caja_ya_esta_cerrada(self):
+        caja = CajaSesion.objects.create(
+            device_id="zephyros-cardputer",
+            estado=CajaSesion.ESTADO_CERRADA,
+            abierta_en=datetime(2026, 6, 18, 4, 30, tzinfo=datetime_timezone.utc),
+            cerrada_en=datetime(2026, 6, 18, 5, 30, tzinfo=datetime_timezone.utc),
+        )
+
+        response = self.post_operation(self.payload_cerrar_caja(caja))
+
+        self.assertEqual(response.status_code, 422)
+        self.assertEqual(response.json()["error"]["code"], "business_validation_error")
+
+    def test_cerrar_caja_falla_si_cerrada_en_es_anterior_a_abierta_en(self):
+        caja = CajaSesion.objects.create(
+            device_id="zephyros-cardputer",
+            abierta_en=datetime(2026, 6, 18, 4, 30, tzinfo=datetime_timezone.utc),
+        )
+        payload = self.payload_cerrar_caja(caja, cerrada_en="2026-06-18T04:29:00Z")
+
+        response = self.post_operation(payload)
+
+        self.assertEqual(response.status_code, 422)
+        self.assertEqual(response.json()["error"]["code"], "business_validation_error")
+        caja.refresh_from_db()
+        self.assertEqual(caja.estado, CajaSesion.ESTADO_ABIERTA)
+
+    def test_cerrar_caja_falla_si_efectivo_contado_es_negativo(self):
+        caja = CajaSesion.objects.create(
+            device_id="zephyros-cardputer",
+            abierta_en=datetime(2026, 6, 18, 4, 30, tzinfo=datetime_timezone.utc),
+        )
+        payload = self.payload_cerrar_caja(caja, efectivo_contado_cierre="-1.00")
+
+        response = self.post_operation(payload)
+
+        self.assertEqual(response.status_code, 422)
+        self.assertEqual(response.json()["error"]["code"], "business_validation_error")
+        caja.refresh_from_db()
+        self.assertEqual(caja.estado, CajaSesion.ESTADO_ABIERTA)
+
     def test_cobrar_ticket_con_token_valido_funciona(self):
         ticket = self.crear_ticket_para_cobrar()
 
@@ -813,6 +1076,103 @@ class ChremataOperationsApiTests(TestCase):
         self.assertEqual(operacion.ticket, ticket)
         self.assertEqual(operacion.ingreso, Ingreso.objects.get())
         self.assertEqual(operacion.ticket_pago, TicketPago.objects.get())
+
+    def test_cobrar_ticket_sin_caja_public_id_sigue_funcionando(self):
+        ticket = self.crear_ticket_para_cobrar()
+
+        response = self.post_operation(self.payload_cobrar_ticket(ticket))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIsNone(TicketPago.objects.get().caja_sesion)
+        self.assertIsNone(Ingreso.objects.get().caja_sesion)
+        self.assertIsNone(OperacionDispositivoChremata.objects.get().caja_sesion)
+
+    def test_cobrar_ticket_con_caja_public_id_asocia_pago_ingreso_y_operacion(self):
+        caja = self.crear_caja_sesion_abierta()
+        ticket = self.crear_ticket_para_cobrar()
+        payload = self.payload_cobrar_ticket(ticket, caja_public_id=str(caja.public_id))
+
+        response = self.post_operation(payload)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(TicketPago.objects.get().caja_sesion, caja)
+        self.assertEqual(Ingreso.objects.get().caja_sesion, caja)
+        self.assertEqual(OperacionDispositivoChremata.objects.get().caja_sesion, caja)
+
+    def test_cobrar_ticket_falla_si_caja_public_id_no_existe(self):
+        ticket = self.crear_ticket_para_cobrar()
+        payload = self.payload_cobrar_ticket(ticket, caja_public_id=str(uuid4()))
+
+        response = self.post_operation(payload)
+
+        self.assertEqual(response.status_code, 422)
+        self.assertEqual(response.json()["error"]["code"], "missing_dependency")
+        self.assertEqual(TicketPago.objects.count(), 0)
+        self.assertEqual(Ingreso.objects.count(), 0)
+
+    def test_cobrar_ticket_falla_si_caja_public_id_esta_cerrada(self):
+        caja = self.crear_caja_sesion_cerrada()
+        ticket = self.crear_ticket_para_cobrar()
+        payload = self.payload_cobrar_ticket(ticket, caja_public_id=str(caja.public_id))
+
+        response = self.post_operation(payload)
+
+        self.assertEqual(response.status_code, 422)
+        self.assertEqual(response.json()["error"]["code"], "business_validation_error")
+        self.assertEqual(TicketPago.objects.count(), 0)
+        self.assertEqual(Ingreso.objects.count(), 0)
+
+    def test_cobrar_ticket_falla_si_caja_public_id_es_de_otro_device(self):
+        caja = self.crear_caja_sesion_abierta(device_id="otro-device")
+        ticket = self.crear_ticket_para_cobrar()
+        payload = self.payload_cobrar_ticket(ticket, caja_public_id=str(caja.public_id))
+
+        response = self.post_operation(payload)
+
+        self.assertEqual(response.status_code, 422)
+        self.assertEqual(response.json()["error"]["code"], "business_validation_error")
+        self.assertEqual(TicketPago.objects.count(), 0)
+        self.assertEqual(Ingreso.objects.count(), 0)
+
+    def test_cobrar_ticket_falla_si_caja_public_id_tiene_formato_invalido(self):
+        ticket = self.crear_ticket_para_cobrar()
+        payload = self.payload_cobrar_ticket(ticket, caja_public_id="no-es-uuid")
+
+        response = self.post_operation(payload)
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()["error"]["code"], "invalid_payload")
+        self.assertEqual(TicketPago.objects.count(), 0)
+        self.assertEqual(Ingreso.objects.count(), 0)
+
+    def test_cobrar_ticket_con_caja_es_idempotente(self):
+        caja = self.crear_caja_sesion_abierta()
+        ticket = self.crear_ticket_para_cobrar()
+        payload = self.payload_cobrar_ticket(ticket, caja_public_id=str(caja.public_id))
+
+        primera = self.post_operation(payload)
+        segunda = self.post_operation(payload)
+
+        self.assertEqual(primera.status_code, 200)
+        self.assertEqual(segunda.status_code, 200)
+        self.assertFalse(primera.json()["duplicate"])
+        self.assertTrue(segunda.json()["duplicate"])
+        self.assertEqual(TicketPago.objects.count(), 1)
+        self.assertEqual(OperacionDispositivoChremata.objects.get().caja_sesion, caja)
+
+    def test_cobrar_ticket_con_caja_misma_llave_payload_distinto_devuelve_409(self):
+        caja = self.crear_caja_sesion_abierta()
+        ticket = self.crear_ticket_para_cobrar()
+        payload = self.payload_cobrar_ticket(ticket, caja_public_id=str(caja.public_id))
+        payload_distinto = dict(payload)
+        payload_distinto["caja_public_id"] = str(uuid4())
+
+        primera = self.post_operation(payload)
+        segunda = self.post_operation(payload_distinto)
+
+        self.assertEqual(primera.status_code, 200)
+        self.assertEqual(segunda.status_code, 409)
+        self.assertEqual(segunda.json()["error"]["code"], "payload_conflict")
 
     def test_cobrar_ticket_respuesta_publica_incluye_snapshots_sin_ids_internos(self):
         GastoMaterial.objects.create(
@@ -1356,6 +1716,88 @@ class ChremataOperationsApiTests(TestCase):
         self.assertIsNone(operacion.ticket)
         self.assertIsNone(operacion.ingreso)
         self.assertIsNone(operacion.ticket_pago)
+
+    def test_crear_gasto_material_sin_caja_public_id_sigue_funcionando(self):
+        response = self.post_operation(self.payload_crear_gasto_material())
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIsNone(GastoMaterial.objects.get().caja_sesion)
+        self.assertIsNone(OperacionDispositivoChremata.objects.get().caja_sesion)
+
+    def test_crear_gasto_material_con_caja_public_id_asocia_gasto_y_operacion(self):
+        caja = self.crear_caja_sesion_abierta()
+        payload = self.payload_crear_gasto_material(caja_public_id=str(caja.public_id))
+
+        response = self.post_operation(payload)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(GastoMaterial.objects.get().caja_sesion, caja)
+        self.assertEqual(OperacionDispositivoChremata.objects.get().caja_sesion, caja)
+
+    def test_crear_gasto_material_falla_si_caja_public_id_no_existe(self):
+        payload = self.payload_crear_gasto_material(caja_public_id=str(uuid4()))
+
+        response = self.post_operation(payload)
+
+        self.assertEqual(response.status_code, 422)
+        self.assertEqual(response.json()["error"]["code"], "missing_dependency")
+        self.assertEqual(GastoMaterial.objects.count(), 0)
+
+    def test_crear_gasto_material_falla_si_caja_public_id_esta_cerrada(self):
+        caja = self.crear_caja_sesion_cerrada()
+        payload = self.payload_crear_gasto_material(caja_public_id=str(caja.public_id))
+
+        response = self.post_operation(payload)
+
+        self.assertEqual(response.status_code, 422)
+        self.assertEqual(response.json()["error"]["code"], "business_validation_error")
+        self.assertEqual(GastoMaterial.objects.count(), 0)
+
+    def test_crear_gasto_material_falla_si_caja_public_id_es_de_otro_device(self):
+        caja = self.crear_caja_sesion_abierta(device_id="otro-device")
+        payload = self.payload_crear_gasto_material(caja_public_id=str(caja.public_id))
+
+        response = self.post_operation(payload)
+
+        self.assertEqual(response.status_code, 422)
+        self.assertEqual(response.json()["error"]["code"], "business_validation_error")
+        self.assertEqual(GastoMaterial.objects.count(), 0)
+
+    def test_crear_gasto_material_con_caja_no_cambia_material_pool(self):
+        caja = self.crear_caja_sesion_abierta()
+
+        response = self.post_operation(
+            self.payload_crear_gasto_material(caja_public_id=str(caja.public_id))
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(Ingreso.calcular_pool_material_actual(), Decimal("120.00"))
+
+    def test_crear_gasto_material_con_caja_es_idempotente(self):
+        caja = self.crear_caja_sesion_abierta()
+        payload = self.payload_crear_gasto_material(caja_public_id=str(caja.public_id))
+
+        primera = self.post_operation(payload)
+        segunda = self.post_operation(payload)
+
+        self.assertEqual(primera.status_code, 200)
+        self.assertEqual(segunda.status_code, 200)
+        self.assertTrue(segunda.json()["duplicate"])
+        self.assertEqual(GastoMaterial.objects.count(), 1)
+        self.assertEqual(OperacionDispositivoChremata.objects.get().caja_sesion, caja)
+
+    def test_crear_gasto_material_con_caja_misma_llave_payload_distinto_devuelve_409(self):
+        caja = self.crear_caja_sesion_abierta()
+        payload = self.payload_crear_gasto_material(caja_public_id=str(caja.public_id))
+        payload_distinto = dict(payload)
+        payload_distinto["caja_public_id"] = str(uuid4())
+
+        primera = self.post_operation(payload)
+        segunda = self.post_operation(payload_distinto)
+
+        self.assertEqual(primera.status_code, 200)
+        self.assertEqual(segunda.status_code, 409)
+        self.assertEqual(segunda.json()["error"]["code"], "payload_conflict")
 
     def test_crear_gasto_material_respuesta_publica(self):
         response = self.post_operation(self.payload_crear_gasto_material()).json()
@@ -1919,6 +2361,232 @@ class ChremataOperationsEndToEndTests(TestCase):
 
 
 @override_settings(DEBUG=False, ARCHEION_DEVICE_TOKEN="")
+class CorteCajaApiTests(TestCase):
+    def setUp(self):
+        self.device_token, self.token_completo = DeviceToken.crear("Zephyros corte")
+        self.metodo_efectivo = MetodoPago.objects.create(nombre="Efectivo")
+        self.metodo_tarjeta = MetodoPago.objects.create(nombre="Tarjeta")
+        self.metodo_transferencia = MetodoPago.objects.create(nombre="Transferencia")
+        self.esquema_sin_comision = EsquemaComision.objects.create(
+            nombre="Sin comisión",
+            porcentaje_base=Decimal("0.0000"),
+        )
+        self.esquema_mp = EsquemaComision.objects.create(
+            nombre="Mercado Pago 3.5% + IVA",
+            porcentaje_base=Decimal("3.5000"),
+            cobra_iva=True,
+        )
+        self.canal_efectivo = CanalCobro.objects.create(
+            nombre="Efectivo en caja",
+            metodo_pago=self.metodo_efectivo,
+            esquema_comision_predeterminado=self.esquema_sin_comision,
+        )
+        self.canal_spei = CanalCobro.objects.create(
+            nombre="SPEI",
+            metodo_pago=self.metodo_transferencia,
+            esquema_comision_predeterminado=self.esquema_sin_comision,
+        )
+        self.canal_tap = CanalCobro.objects.create(
+            nombre="Tap (MP)",
+            metodo_pago=self.metodo_tarjeta,
+            esquema_comision_predeterminado=self.esquema_mp,
+        )
+        self.canal_point = CanalCobro.objects.create(
+            nombre="Point Air (MP)",
+            metodo_pago=self.metodo_tarjeta,
+            esquema_comision_predeterminado=self.esquema_mp,
+        )
+        self.esquema_sin_comision.canales_cobro.add(self.canal_efectivo, self.canal_spei)
+        self.esquema_mp.canales_cobro.add(self.canal_tap, self.canal_point)
+        self.origen = OrigenIngreso.objects.create(nombre="Consultorio")
+        self.concepto_consulta = ConceptoIngreso.objects.create(nombre="Consulta")
+        self.concepto_curacion = ConceptoIngreso.objects.create(
+            nombre="Curación",
+            permite_material_adicional=True,
+        )
+        self.concepto_resumen = ConceptoIngreso.objects.create(
+            nombre="Resumen",
+            permite_material_adicional=True,
+        )
+        self.caja = CajaSesion.objects.create(
+            device_id="zephyros-cardputer",
+            abierta_en=datetime(2026, 6, 18, 4, 30, tzinfo=datetime_timezone.utc),
+            saldo_inicial_efectivo=Decimal("500.00"),
+        )
+
+    def corte_url(self, caja=None):
+        return reverse("api-v1-chremata-caja-corte", args=[caja or self.caja.public_id])
+
+    def get_corte(self, caja=None, token=None):
+        headers = {}
+        if token is None:
+            headers["X-Archeion-Device-Token"] = self.token_completo
+        elif token:
+            headers["X-Archeion-Device-Token"] = token
+        return self.client.get(self.corte_url(caja), headers=headers)
+
+    def crear_ticket(self, lineas):
+        ticket = Ticket.objects.create(
+            fecha=datetime(2026, 6, 18, 5, 0, tzinfo=datetime_timezone.utc),
+            estado=Ticket.ESTADO_PENDIENTE,
+            origen=self.origen,
+        )
+        for orden, linea in enumerate(lineas, start=1):
+            TicketLinea.objects.create(ticket=ticket, orden=orden, **linea)
+        ticket.refresh_from_db()
+        return ticket
+
+    def cobrar_en_caja(self, canal, lineas, *, concepto_resumen=None):
+        ticket = self.crear_ticket(lineas)
+        return cobrar_ticket(
+            ticket=ticket,
+            fecha_cobro=datetime(2026, 6, 18, 5, 30, tzinfo=datetime_timezone.utc),
+            canal_cobro=canal,
+            concepto_ingreso=concepto_resumen or self.concepto_resumen,
+            caja_sesion=self.caja,
+        )
+
+    def test_corte_caja_abierta_sin_cobros_devuelve_totales_cero(self):
+        corte = calcular_corte_caja(self.caja)
+
+        self.assertEqual(corte["contract"], "chremata.corte_caja.v1")
+        self.assertEqual(corte["totales"]["total_bruto"], "0.00")
+        self.assertEqual(corte["efectivo"]["efectivo_esperado"], "500.00")
+        self.assertIsNone(corte["efectivo"]["efectivo_contado_cierre"])
+        self.assertIsNone(corte["efectivo"]["diferencia_efectivo"])
+
+    def test_corte_caja_cerrada_sin_cobros_devuelve_diferencia(self):
+        self.caja.estado = CajaSesion.ESTADO_CERRADA
+        self.caja.cerrada_en = datetime(2026, 6, 18, 7, 0, tzinfo=datetime_timezone.utc)
+        self.caja.efectivo_contado_cierre = Decimal("450.00")
+        self.caja.save()
+
+        corte = calcular_corte_caja(self.caja)
+
+        self.assertEqual(corte["efectivo"]["efectivo_esperado"], "500.00")
+        self.assertEqual(corte["efectivo"]["diferencia_efectivo"], "-50.00")
+
+    def test_corte_suma_totales_por_metodo_y_canal(self):
+        linea = {
+            "concepto": self.concepto_consulta,
+            "cantidad": Decimal("1.00"),
+            "monto_unitario": Decimal("100.00"),
+        }
+        self.cobrar_en_caja(self.canal_efectivo, [linea])
+        self.cobrar_en_caja(self.canal_spei, [linea])
+        self.cobrar_en_caja(self.canal_tap, [linea])
+        self.cobrar_en_caja(self.canal_point, [linea])
+
+        corte = calcular_corte_caja(self.caja)
+
+        self.assertEqual(corte["totales"]["total_efectivo"], "100.00")
+        self.assertEqual(corte["totales"]["total_transferencia"], "100.00")
+        self.assertEqual(corte["totales"]["total_tarjeta"], "200.00")
+        self.assertEqual(corte["totales"]["total_comisiones"], "8.12")
+        canales = {item["canal_cobro"]: item for item in corte["totales_por_canal"]}
+        self.assertEqual(set(canales), {"Efectivo en caja", "SPEI", "Tap (MP)", "Point Air (MP)"})
+        self.assertEqual(canales["Tap (MP)"]["total_comisiones"], "4.06")
+
+    def test_corte_agrupa_conceptos_desde_ticket_linea_y_no_resumen(self):
+        self.cobrar_en_caja(
+            self.canal_efectivo,
+            [
+                {
+                    "concepto": self.concepto_consulta,
+                    "cantidad": Decimal("2.00"),
+                    "monto_unitario": Decimal("100.00"),
+                },
+                {
+                    "concepto": self.concepto_curacion,
+                    "cantidad": Decimal("1.00"),
+                    "monto_unitario": Decimal("80.00"),
+                    "monto_material_cobrado": Decimal("25.00"),
+                },
+            ],
+            concepto_resumen=self.concepto_resumen,
+        )
+
+        corte = calcular_corte_caja(self.caja)
+
+        conceptos = {item["concepto"]: item for item in corte["totales_por_concepto"]}
+        self.assertEqual(set(conceptos), {"Consulta", "Curación"})
+        self.assertEqual(conceptos["Consulta"]["cantidad_total"], "2")
+        self.assertEqual(conceptos["Consulta"]["lineas"], 1)
+        self.assertEqual(conceptos["Consulta"]["total"], "200.00")
+        self.assertEqual(conceptos["Curación"]["material_cobrado"], "25.00")
+        self.assertNotIn("Resumen", conceptos)
+
+    def test_gastos_material_aparecen_y_no_restan_efectivo(self):
+        GastoMaterial.objects.create(
+            caja_sesion=self.caja,
+            fecha=datetime(2026, 6, 18, 6, 0, tzinfo=datetime_timezone.utc),
+            monto=Decimal("120.00"),
+            descripcion="Gasas",
+        )
+
+        corte = calcular_corte_caja(self.caja)
+
+        self.assertEqual(corte["gastos_material"]["cantidad"], 1)
+        self.assertEqual(corte["gastos_material"]["total_gastos_material"], "120.00")
+        self.assertEqual(corte["efectivo"]["efectivo_esperado"], "500.00")
+        self.assertEqual(Ingreso.calcular_pool_material_actual(), Decimal("120.00"))
+
+    def test_cerrar_caja_persiste_snapshot_real_y_diferencia(self):
+        self.cobrar_en_caja(
+            self.canal_efectivo,
+            [
+                {
+                    "concepto": self.concepto_consulta,
+                    "cantidad": Decimal("1.00"),
+                    "monto_unitario": Decimal("100.00"),
+                }
+            ],
+        )
+        payload = {
+            "operation": "cerrar_caja",
+            "operation_contract": "chremata.operation.cerrar_caja.v1",
+            "device_id": self.caja.device_id,
+            "device_entry_id": str(uuid4()),
+            "caja_public_id": str(self.caja.public_id),
+            "cerrada_en": "2026-06-18T07:00:00Z",
+            "efectivo_contado_cierre": "590.00",
+            "notas_cierre": "Faltan 10",
+        }
+
+        response = self.client.post(
+            reverse("api-v1-chremata-operations"),
+            data=json.dumps(payload),
+            content_type="application/json",
+            headers={"X-Archeion-Device-Token": self.token_completo},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.caja.refresh_from_db()
+        self.assertEqual(self.caja.total_efectivo, Decimal("100.00"))
+        self.assertEqual(self.caja.efectivo_esperado, Decimal("600.00"))
+        self.assertEqual(self.caja.diferencia_efectivo, Decimal("-10.00"))
+        self.assertEqual(self.caja.resumen_snapshot["contract"], "chremata.corte_caja.v1")
+        self.assertEqual(self.caja.resumen_snapshot["totales"]["total_bruto"], "100.00")
+
+    def test_endpoint_requiere_token(self):
+        response = self.get_corte(token="")
+
+        self.assertEqual(response.status_code, 401)
+
+    def test_endpoint_caja_inexistente_devuelve_404(self):
+        response = self.get_corte(caja=uuid4())
+
+        self.assertEqual(response.status_code, 404)
+
+    def test_endpoint_devuelve_corte(self):
+        response = self.get_corte()
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["contract"], "chremata.corte_caja.v1")
+        self.assertIn("totales_por_concepto", response.json())
+
+
+@override_settings(DEBUG=False, ARCHEION_DEVICE_TOKEN="")
 class MaterialPoolApiTests(TestCase):
     def setUp(self):
         self.device_token, self.token_completo = DeviceToken.crear("Zephyros")
@@ -2215,6 +2883,8 @@ class ChremataSchemaApiTests(TestCase):
                 "operations": [
                     "chremata.operation.crear_ingreso.v1",
                     "chremata.operation.crear_gasto_material.v1",
+                    "chremata.operation.abrir_caja.v1",
+                    "chremata.operation.cerrar_caja.v1",
                     "chremata.operation.crear_ticket.v1",
                     "chremata.operation.cobrar_ticket.v1",
                     "chremata.operation.cancelar_ticket.v1",
@@ -2429,7 +3099,17 @@ class ChremataSchemaApiTests(TestCase):
             operations["abandonar_ticket"]["contract"],
             "chremata.operation.abandonar_ticket.v1",
         )
+        self.assertEqual(
+            operations["abrir_caja"]["contract"],
+            "chremata.operation.abrir_caja.v1",
+        )
+        self.assertEqual(
+            operations["cerrar_caja"]["contract"],
+            "chremata.operation.cerrar_caja.v1",
+        )
         for name in (
+            "abrir_caja",
+            "cerrar_caja",
             "crear_ticket",
             "cobrar_ticket",
             "cancelar_ticket",
@@ -2444,6 +3124,50 @@ class ChremataSchemaApiTests(TestCase):
                 operations[name]["idempotency_key"],
                 ["device_id", "device_entry_id"],
             )
+
+    def test_declara_operaciones_de_caja(self):
+        data = self.get_schema().json()
+        abrir_caja = self.operation_payload_field_names(data, "abrir_caja")
+        cerrar_caja = self.operation_payload_field_names(data, "cerrar_caja")
+        abrir_fields = self.operation_payload_fields_by_name(data, "abrir_caja")
+        cerrar_fields = self.operation_payload_fields_by_name(data, "cerrar_caja")
+
+        self.assertEqual(
+            abrir_caja,
+            {
+                "operation",
+                "operation_contract",
+                "device_id",
+                "device_entry_id",
+                "caja_public_id",
+                "caja_fisica_public_id",
+                "abierta_en",
+                "saldo_inicial_efectivo",
+                "notas_apertura",
+            },
+        )
+        self.assertEqual(
+            cerrar_caja,
+            {
+                "operation",
+                "operation_contract",
+                "device_id",
+                "device_entry_id",
+                "caja_public_id",
+                "cerrada_en",
+                "efectivo_contado_cierre",
+                "notas_cierre",
+            },
+        )
+        self.assertEqual(
+            abrir_fields["caja_fisica_public_id"]["relation"],
+            "cajas_fisicas.public_id",
+        )
+        self.assertFalse(abrir_fields["caja_fisica_public_id"]["required"])
+        self.assertTrue(abrir_fields["caja_fisica_public_id"]["nullable"])
+        self.assertEqual(cerrar_fields["caja_public_id"]["relation"], "caja_sesion.public_id")
+        self.assertEqual(abrir_fields["saldo_inicial_efectivo"]["type"], "money_string")
+        self.assertEqual(cerrar_fields["efectivo_contado_cierre"]["type"], "money_string")
 
     def test_crear_ticket_incluye_lineas_como_array(self):
         data = self.get_schema().json()
@@ -2468,6 +3192,7 @@ class ChremataSchemaApiTests(TestCase):
         self.assertIn("canal_cobro_public_id", fields)
         self.assertIn("esquema_comision_public_id", fields)
         self.assertIn("concepto_ingreso_resumen_public_id", fields)
+        self.assertIn("caja_public_id", fields)
         self.assertEqual(
             fields["canal_cobro_public_id"]["relation"],
             "canales_cobro.public_id",
@@ -2482,6 +3207,13 @@ class ChremataSchemaApiTests(TestCase):
             fields["concepto_ingreso_resumen_public_id"]["relation"],
             "conceptos_ingreso.public_id",
         )
+        self.assertEqual(fields["caja_public_id"]["relation"], "caja_sesion.public_id")
+        self.assertFalse(fields["caja_public_id"]["required"])
+        self.assertTrue(fields["caja_public_id"]["nullable"])
+        self.assertEqual(
+            fields["caja_public_id"]["compatibility"],
+            "optional_temporarily",
+        )
         self.assertEqual(fields["fecha_cobro"]["type"], "datetime_utc_string")
         self.assertTrue(
             data["operations"]["cobrar_ticket"]["server_authority"][
@@ -2492,12 +3224,23 @@ class ChremataSchemaApiTests(TestCase):
     def test_schema_sigue_declarando_material_pool(self):
         self.assertIn("material_pool", self.get_schema().json())
 
-    def test_declara_los_cinco_catalogos(self):
+    def test_schema_declara_corte_de_caja(self):
+        caja = self.get_schema().json()["caja"]
+
+        self.assertEqual(
+            caja["corte_endpoint"],
+            "/api/v1/chremata/cajas/<caja_public_id>/corte/",
+        )
+        self.assertEqual(caja["corte_contract"], "chremata.corte_caja.v1")
+        self.assertIn("totales_por_concepto", caja["fields"])
+
+    def test_declara_los_seis_catalogos(self):
         catalogs = self.get_schema().json()["catalogs"]
 
         self.assertEqual(
             set(catalogs),
             {
+                "cajas_fisicas",
                 "metodos_pago",
                 "canales_cobro",
                 "esquemas_comision",
@@ -2511,6 +3254,10 @@ class ChremataSchemaApiTests(TestCase):
     def test_declara_campos_de_catalogos_y_relaciones_por_public_id(self):
         data = self.get_schema().json()
 
+        self.assertEqual(
+            self.catalog_field_names(data, "cajas_fisicas"),
+            {"public_id", "nombre", "descripcion", "activa"},
+        )
         self.assertEqual(
             self.catalog_field_names(data, "metodos_pago"),
             {"public_id", "nombre"},
@@ -2595,6 +3342,8 @@ class ChremataSchemaApiTests(TestCase):
             {
                 "crear_ingreso",
                 "crear_gasto_material",
+                "abrir_caja",
+                "cerrar_caja",
                 "crear_ticket",
                 "cobrar_ticket",
                 "cancelar_ticket",
@@ -2647,8 +3396,14 @@ class ChremataSchemaApiTests(TestCase):
             self.operation_payload_field_names(
                 self.get_schema().json(), "crear_gasto_material"
             ),
-            {"fecha", "monto", "descripcion", "notas"},
+            {"fecha", "monto", "caja_public_id", "descripcion", "notas"},
         )
+        gasto_fields = self.operation_payload_fields_by_name(
+            self.get_schema().json(), "crear_gasto_material"
+        )
+        self.assertEqual(gasto_fields["caja_public_id"]["relation"], "caja_sesion.public_id")
+        self.assertFalse(gasto_fields["caja_public_id"]["required"])
+        self.assertTrue(gasto_fields["caja_public_id"]["nullable"])
 
     def test_declara_autoridad_del_servidor_para_operaciones(self):
         operations = self.get_schema().json()["operations"]

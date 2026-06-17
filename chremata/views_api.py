@@ -4,11 +4,15 @@ from decimal import Decimal
 
 from django.db.models import Max, Prefetch, Sum
 from django.http import JsonResponse
+from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from django.views.decorators.http import require_GET, require_POST
 
 from .operations import OperationValidationError, procesar_operacion_chremata
+from .services import calcular_corte_caja
 from .models import (
+    CajaFisica,
+    CajaSesion,
     CanalCobro,
     ConceptoIngreso,
     EsquemaComision,
@@ -51,6 +55,15 @@ def _campo_schema(nombre, tipo, required=True, **extra):
 
 def _chremata_catalogs_schema():
     return {
+        "cajas_fisicas": {
+            "identity": "public_id",
+            "fields": [
+                _campo_schema("public_id", "uuid"),
+                _campo_schema("nombre", "string"),
+                _campo_schema("descripcion", "string", required=False),
+                _campo_schema("activa", "boolean"),
+            ],
+        },
         "metodos_pago": {
             "identity": "public_id",
             "fields": [
@@ -111,6 +124,25 @@ def _chremata_catalogs_schema():
                 _campo_schema("nombre", "string"),
                 _campo_schema("descripcion", "string", required=False),
             ],
+        },
+    }
+
+
+def _chremata_caja_schema():
+    return {
+        "corte_endpoint": "/api/v1/chremata/cajas/<caja_public_id>/corte/",
+        "corte_contract": "chremata.corte_caja.v1",
+        "fields": {
+            "contract": {"type": "string", "required": True},
+            "generated_at": {"type": "datetime_utc_string", "required": True},
+            "caja": {"type": "object", "required": True},
+            "efectivo": {"type": "object", "required": True},
+            "totales": {"type": "object", "required": True},
+            "totales_por_metodo": {"type": "array", "required": True},
+            "totales_por_canal": {"type": "array", "required": True},
+            "totales_por_concepto": {"type": "array", "required": True},
+            "gastos_material": {"type": "object", "required": True},
+            "tickets": {"type": "object", "required": True},
         },
     }
 
@@ -308,6 +340,15 @@ def _chremata_operations_schema():
             "payload_fields": [
                 _campo_schema("fecha", "datetime_utc_string"),
                 _campo_schema("monto", "money_string"),
+                _campo_schema(
+                    "caja_public_id",
+                    "uuid",
+                    required=False,
+                    nullable=True,
+                    relation="caja_sesion.public_id",
+                    compatibility="optional_temporarily",
+                    future_client_rule="zephyros_should_send_when_cash_session_open",
+                ),
                 _campo_schema("descripcion", "string", required=False),
                 _campo_schema("notas", "string", required=False),
             ],
@@ -315,6 +356,50 @@ def _chremata_operations_schema():
                 "updates_material_pool": True,
                 "device_values_are_input_not_authority": True,
             },
+        },
+    }
+
+    operaciones["abrir_caja"] = {
+        **_ticket_operation_common("chremata.operation.abrir_caja.v1"),
+        "payload_fields": [
+            _campo_schema("operation", "string"),
+            _campo_schema("operation_contract", "string"),
+            _campo_schema("device_id", "string"),
+            _campo_schema("device_entry_id", "string"),
+            _campo_schema("caja_public_id", "uuid"),
+            _campo_schema(
+                "caja_fisica_public_id",
+                "uuid",
+                required=False,
+                nullable=True,
+                relation="cajas_fisicas.public_id",
+            ),
+            _campo_schema("abierta_en", "datetime_utc_string"),
+            _campo_schema("saldo_inicial_efectivo", "money_string"),
+            _campo_schema("notas_apertura", "string", required=False),
+        ],
+        "server_authority": {
+            "creates_caja_sesion": True,
+            "requires_unique_open_session_by_device": True,
+            "does_not_change_payments": True,
+        },
+    }
+    operaciones["cerrar_caja"] = {
+        **_ticket_operation_common("chremata.operation.cerrar_caja.v1"),
+        "payload_fields": [
+            _campo_schema("operation", "string"),
+            _campo_schema("operation_contract", "string"),
+            _campo_schema("device_id", "string"),
+            _campo_schema("device_entry_id", "string"),
+            _campo_schema("caja_public_id", "uuid", relation="caja_sesion.public_id"),
+            _campo_schema("cerrada_en", "datetime_utc_string"),
+            _campo_schema("efectivo_contado_cierre", "money_string"),
+            _campo_schema("notas_cierre", "string", required=False),
+        ],
+        "server_authority": {
+            "closes_caja_sesion": True,
+            "snapshots_zero_totals_until_payments_are_linked": True,
+            "does_not_change_payments": True,
         },
     }
 
@@ -365,6 +450,15 @@ def _chremata_operations_schema():
                 "uuid",
                 relation="conceptos_ingreso.public_id",
             ),
+            _campo_schema(
+                "caja_public_id",
+                "uuid",
+                required=False,
+                nullable=True,
+                relation="caja_sesion.public_id",
+                compatibility="optional_temporarily",
+                future_client_rule="zephyros_should_send_when_cash_session_open",
+            ),
             _campo_schema("notas", "string", required=False),
         ],
         "server_authority": {
@@ -413,6 +507,16 @@ def _chremata_operations_schema():
     }
 
     return operaciones
+
+
+def _serializar_caja_fisica(caja):
+    return {
+        "id": caja.id,
+        "public_id": str(caja.public_id),
+        "nombre": caja.nombre,
+        "descripcion": caja.descripcion,
+        "activa": caja.activa,
+    }
 
 
 def _serializar_metodo_pago(metodo):
@@ -568,9 +672,16 @@ def material_pool(request):
 
 
 @require_GET
+def corte_caja(request, caja_public_id):
+    caja_sesion = get_object_or_404(CajaSesion, public_id=caja_public_id)
+    return JsonResponse(calcular_corte_caja(caja_sesion))
+
+
+@require_GET
 def catalogos(request):
     generated_at_iso = _generated_at_iso()
 
+    cajas_fisicas = CajaFisica.objects.filter(activa=True).order_by("nombre", "id")
     metodos_pago = MetodoPago.objects.filter(activo=True).order_by("nombre", "id")
     canales_cobro = (
         CanalCobro.objects.filter(activo=True)
@@ -611,6 +722,9 @@ def catalogos(request):
             "snapshot_id": f"cat_{generated_at_iso}",
             "generated_at": generated_at_iso,
             "catalogs": {
+                "cajas_fisicas": [
+                    _serializar_caja_fisica(item) for item in cajas_fisicas
+                ],
                 "metodos_pago": [
                     _serializar_metodo_pago(item) for item in metodos_pago
                 ],
@@ -645,6 +759,8 @@ def chremata_schema(request):
                 "operations": [
                     "chremata.operation.crear_ingreso.v1",
                     "chremata.operation.crear_gasto_material.v1",
+                    "chremata.operation.abrir_caja.v1",
+                    "chremata.operation.cerrar_caja.v1",
                     "chremata.operation.crear_ticket.v1",
                     "chremata.operation.cobrar_ticket.v1",
                     "chremata.operation.cancelar_ticket.v1",
@@ -663,6 +779,7 @@ def chremata_schema(request):
                 "nullable_fields_use_null": True,
             },
             "material_pool": _chremata_material_pool_schema(),
+            "caja": _chremata_caja_schema(),
             "tickets": _chremata_tickets_schema(),
             "catalogs": _chremata_catalogs_schema(),
             "operations": _chremata_operations_schema(),
