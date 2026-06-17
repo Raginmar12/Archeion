@@ -24,7 +24,7 @@ from .models import (
 )
 
 
-@override_settings(DEBUG=False, CODEX_DEVICE_TOKEN="")
+@override_settings(DEBUG=False, ARCHEION_DEVICE_TOKEN="")
 class CatalogosApiTests(TestCase):
     def setUp(self):
         self.device_token, self.token_completo = DeviceToken.crear("Cardputer")
@@ -86,7 +86,7 @@ class CatalogosApiTests(TestCase):
     def get_catalogos(self):
         return self.client.get(
             self.url,
-            headers={"X-Codex-Device-Token": self.token_completo},
+            headers={"X-Archeion-Device-Token": self.token_completo},
         )
 
     def test_responde_200_con_token_valido(self):
@@ -291,7 +291,7 @@ class CatalogosApiTests(TestCase):
         self.assertIsInstance(concepto["monto_material_sugerido"], str)
 
 
-@override_settings(DEBUG=False, CODEX_DEVICE_TOKEN="")
+@override_settings(DEBUG=False, ARCHEION_DEVICE_TOKEN="")
 class ChremataOperationsApiTests(TestCase):
     def setUp(self):
         self.device_token, self.token_completo = DeviceToken.crear("Zephyros")
@@ -323,9 +323,9 @@ class ChremataOperationsApiTests(TestCase):
     def post_operation(self, payload, token=None):
         headers = {}
         if token is not None:
-            headers["X-Codex-Device-Token"] = token
+            headers["X-Archeion-Device-Token"] = token
         else:
-            headers["X-Codex-Device-Token"] = self.token_completo
+            headers["X-Archeion-Device-Token"] = self.token_completo
         return self.client.post(
             self.url,
             data=json.dumps(payload),
@@ -563,7 +563,7 @@ class ChremataOperationsApiTests(TestCase):
             self.url,
             data="{no-json",
             content_type="application/json",
-            headers={"X-Codex-Device-Token": self.token_completo},
+            headers={"X-Archeion-Device-Token": self.token_completo},
         )
 
         self.assertEqual(response.status_code, 400)
@@ -1464,7 +1464,7 @@ class ChremataOperationsApiTests(TestCase):
         self.assertEqual(response.status_code, 200)
         pool_response = self.client.get(
             reverse("api-v1-chremata-material-pool"),
-            headers={"X-Codex-Device-Token": self.token_completo},
+            headers={"X-Archeion-Device-Token": self.token_completo},
         )
         data = pool_response.json()
         self.assertEqual(data["total_gastos_material"], "120.00")
@@ -1472,7 +1472,7 @@ class ChremataOperationsApiTests(TestCase):
         self.assertEqual(data["ultimo_gasto_material_fecha"], "2026-06-11T12:00:00Z")
 
 
-@override_settings(DEBUG=False, CODEX_DEVICE_TOKEN="")
+@override_settings(DEBUG=False, ARCHEION_DEVICE_TOKEN="")
 class ChremataOperationsEndToEndTests(TestCase):
     def setUp(self):
         self.device_token, self.token_completo = DeviceToken.crear("Zephyros E2E")
@@ -1480,7 +1480,7 @@ class ChremataOperationsEndToEndTests(TestCase):
         self.schema_url = reverse("api-v1-chremata-schema")
         self.material_pool_url = reverse("api-v1-chremata-material-pool")
         self.operations_url = reverse("api-v1-chremata-operations")
-        self.headers = {"X-Codex-Device-Token": self.token_completo}
+        self.headers = {"X-Archeion-Device-Token": self.token_completo}
         self.device_id = "zephyros-e2e"
 
         self.origen = OrigenIngreso.objects.create(nombre="Consultorio E2E")
@@ -1508,11 +1508,11 @@ class ChremataOperationsEndToEndTests(TestCase):
         )
 
     def get_api(self, url, token=None):
-        headers = self.headers if token is None else {"X-Codex-Device-Token": token}
+        headers = self.headers if token is None else {"X-Archeion-Device-Token": token}
         return self.client.get(url, headers=headers)
 
     def post_operation(self, payload, token=None):
-        headers = self.headers if token is None else {"X-Codex-Device-Token": token}
+        headers = self.headers if token is None else {"X-Archeion-Device-Token": token}
         return self.client.post(
             self.operations_url,
             data=json.dumps(payload),
@@ -1918,7 +1918,7 @@ class ChremataOperationsEndToEndTests(TestCase):
         self.assertEqual(response.status_code, 200)
 
 
-@override_settings(DEBUG=False, CODEX_DEVICE_TOKEN="")
+@override_settings(DEBUG=False, ARCHEION_DEVICE_TOKEN="")
 class MaterialPoolApiTests(TestCase):
     def setUp(self):
         self.device_token, self.token_completo = DeviceToken.crear("Zephyros")
@@ -1946,7 +1946,7 @@ class MaterialPoolApiTests(TestCase):
     def get_material_pool(self):
         return self.client.get(
             self.url,
-            headers={"X-Codex-Device-Token": self.token_completo},
+            headers={"X-Archeion-Device-Token": self.token_completo},
         )
 
     def crear_gasto(self, monto, fecha):
@@ -2144,7 +2144,7 @@ class MaterialPoolApiTests(TestCase):
         )
 
 
-@override_settings(DEBUG=False, CODEX_DEVICE_TOKEN="")
+@override_settings(DEBUG=False, ARCHEION_DEVICE_TOKEN="")
 class ChremataSchemaApiTests(TestCase):
     def setUp(self):
         self.device_token, self.token_completo = DeviceToken.crear("Zephyros")
@@ -2153,7 +2153,7 @@ class ChremataSchemaApiTests(TestCase):
     def get_schema(self):
         return self.client.get(
             self.url,
-            headers={"X-Codex-Device-Token": self.token_completo},
+            headers={"X-Archeion-Device-Token": self.token_completo},
         )
 
     def catalog_field_names(self, data, catalog_name):

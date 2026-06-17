@@ -4,7 +4,7 @@ import secrets
 from django.db import models
 
 
-TOKEN_PREFIX = "codexhub_"
+TOKEN_PREFIX = "archeion_"
 PREFIJO_VISIBLE_LONGITUD = 24
 
 

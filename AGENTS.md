@@ -1,15 +1,15 @@
-# Instrucciones para agentes de CodexHub
+# Instrucciones para agentes de Archeion
 
-CodexHub es un proyecto personal de Django para Ramiro. Es un sistema privado y local-first pensado para registrar y analizar actividad económica personal.
+Archeion es un proyecto personal de Django para Ramiro. Es un sistema privado y local-first pensado para registrar y analizar actividad económica personal.
 
 ## Identidad del proyecto
 
-CodexHub NO es el sistema clínico de pacientes.
+Archeion NO es el sistema clínico de pacientes.
 
-- CodexHub: ecosistema personal, registro de ingresos, análisis financiero, métricas personales, actividad laboral e integraciones futuras.
+- Archeion: ecosistema personal, registro de ingresos, análisis financiero, métricas personales, actividad laboral e integraciones futuras.
 - MetaboCore: futuro sistema clínico orientado a pacientes.
 
-No agregar expedientes de pacientes, diagnósticos, tratamientos, recetas, laboratorios ni flujos clínicos a CodexHub salvo que se solicite explícitamente.
+No agregar expedientes de pacientes, diagnósticos, tratamientos, recetas, laboratorios ni flujos clínicos a Archeion salvo que se solicite explícitamente.
 
 ## Alcance actual
 

@@ -1,27 +1,27 @@
-# Contrato inicial de sincronización Cardputer/Codex
+# Contrato inicial de sincronización Cardputer/Zephyros
 
 Este documento define el contrato técnico inicial para capturar operaciones de Ledger
-desde Cardputer/Codex sin conexión y sincronizarlas posteriormente con CodexHub. Es un
-diseño preparatorio: por ahora CodexHub solo expone la descarga de catálogos y todavía
+desde Cardputer/Zephyros sin conexión y sincronizarlas posteriormente con Archeion. Es un
+diseño preparatorio: por ahora Archeion solo expone la descarga de catálogos y todavía
 no existe un endpoint para subir operaciones.
 
 ## Arquitectura y responsabilidades
 
-CodexHub es la fuente principal de datos y la autoridad que consolidará la historia de
-Ledger. Cardputer/Codex funciona como un dispositivo satélite **offline-first**: debe
+Archeion es la fuente principal de datos y la autoridad que consolidará la historia de
+Ledger. Cardputer/Zephyros funciona como un dispositivo satélite **offline-first**: debe
 poder descargar una fotografía de los catálogos, capturar operaciones localmente sin
 conexión y conservarlas hasta que una sincronización futura sea confirmada por
-CodexHub.
+Archeion.
 
 El flujo previsto es:
 
-1. Cardputer descarga un snapshot de catálogos activos desde CodexHub.
+1. Cardputer descarga un snapshot de catálogos activos desde Archeion.
 2. Cardputer conserva el snapshot completo y lo usa para capturar nuevas operaciones.
 3. Cada operación se agrega a un registro local append-only con sus referencias UUID y
    una fotografía de los nombres y cálculos mostrados al usuario.
 4. Cuando haya conexión, Cardputer enviará operaciones pendientes a un futuro endpoint
    de sincronización.
-5. CodexHub validará, recalculará comisiones y hará el merge idempotente en la historia
+5. Archeion validará, recalculará comisiones y hará el merge idempotente en la historia
    principal.
 6. Cardputer actualizará por separado el estado local de sincronización.
 
@@ -35,11 +35,11 @@ explícitas y no como mutaciones silenciosas de registros históricos.
 
 ```http
 GET /api/v1/catalogos/
-X-Codex-Device-Token: <token-del-dispositivo>
+X-Archeion-Device-Token: <token-del-dispositivo>
 ```
 
-La ruta está protegida por el middleware de tokens de dispositivo de CodexHub. Cada
-dispositivo debe enviar su token mediante el encabezado `X-Codex-Device-Token`.
+La ruta está protegida por el middleware de tokens de dispositivo de Archeion. Cada
+dispositivo debe enviar su token mediante el encabezado `X-Archeion-Device-Token`.
 
 ### Estructura general de respuesta
 
@@ -63,7 +63,7 @@ dispositivo debe enviar su token mediante el encabezado `X-Codex-Device-Token`.
   puede conservar la versión; un cambio incompatible deberá incrementarla.
 - `snapshot_id` identifica la fotografía específica descargada. Debe guardarse junto a
   cada operación capturada para poder determinar qué catálogos vio el dispositivo.
-- `generated_at` indica, en formato ISO 8601 timezone-aware, cuándo CodexHub generó la
+- `generated_at` indica, en formato ISO 8601 timezone-aware, cuándo Archeion generó la
   fotografía.
 - `catalogs` contiene únicamente registros activos de los catálogos base de Ledger.
 - `public_id` es la identidad pública UUID estable de cada registro de catálogo y debe
@@ -72,7 +72,7 @@ dispositivo debe enviar su token mediante el encabezado `X-Codex-Device-Token`.
   JSON de punto flotante. Por ejemplo: `"50.00"` y `"4.0600"`.
 - Los campos opcionales sin valor viajan como `null`.
 
-El `id` entero de Django puede aparecer en el snapshot como dato auxiliar para CodexHub,
+El `id` entero de Django puede aparecer en el snapshot como dato auxiliar para Archeion,
 pero Cardputer no debe usarlo como identidad durable. Las referencias locales y futuras
 solicitudes de sincronización deben usar `public_id`.
 
@@ -81,14 +81,16 @@ solicitudes de sincronización deben usar `public_id`.
 La siguiente estructura separa configuración, catálogos, operaciones inmutables y
 estado mutable de sincronización:
 
+Zephyros debe actualizarse para usar estas rutas nuevas; las rutas locales anteriores quedan obsoletas y no deben mezclarse con esta estructura.
+
 | Ruta | Propósito |
 | --- | --- |
-| `/sd/codex/config.json` | Configuración del dispositivo, como `device_id`, URL local de CodexHub y credenciales protegidas según las capacidades del dispositivo. |
-| `/sd/codex/catalog_snapshot.json` | Último snapshot completo descargado desde `GET /api/v1/catalogos/`. |
-| `/sd/codex/entries.jsonl` | Bitácora append-only de operaciones capturadas localmente, con un objeto JSON por línea. |
-| `/sd/codex/sync_state.json` | Estado mutable de sincronización de cada `device_entry_id`. |
+| `/sd/zephyros/config.json` | Configuración del dispositivo, como `device_id`, URL local de Archeion y credenciales protegidas según las capacidades del dispositivo. |
+| `/sd/zephyros/chremata/material_pool_snapshot.json` | Último snapshot completo descargado desde `GET /api/v1/catalogos/`. |
+| `/sd/zephyros/chremata/entries_v2.jsonl` | Bitácora append-only de operaciones capturadas localmente, con un objeto JSON por línea. |
+| `/sd/zephyros/chremata/sync_state.json` | Estado mutable de sincronización de cada `device_entry_id`. |
 
-`catalog_snapshot.json` debe reemplazarse de forma segura, por ejemplo escribiendo
+`material_pool_snapshot.json` debe reemplazarse de forma segura, por ejemplo escribiendo
 primero un archivo temporal completo y después renombrándolo. Una operación ya
 capturada debe conservar el `catalog_snapshot_id`, la fecha del snapshot, UUIDs y
 nombres congelados que utilizó, aunque posteriormente se descargue un snapshot nuevo.
@@ -97,9 +99,9 @@ El token de dispositivo es un secreto. Si se guarda en `config.json`, se deben a
 las mejores protecciones disponibles en Cardputer y evitar copiarlo a logs, snapshots u
 operaciones.
 
-## Formato recomendado de `entries.jsonl`
+## Formato recomendado de `entries_v2.jsonl`
 
-`entries.jsonl` contiene una operación JSON completa por línea. Para crear un ingreso,
+`entries_v2.jsonl` contiene una operación JSON completa por línea. Para crear un ingreso,
 se recomienda el siguiente contrato inicial:
 
 ```json
@@ -145,11 +147,11 @@ estructura lógica es:
 | `notas` | Notas capturadas localmente. |
 
 Los valores calculados por Cardputer son una fotografía útil para auditoría y para
-mostrar resultados offline; no sustituyen los cálculos definitivos de CodexHub.
+mostrar resultados offline; no sustituyen los cálculos definitivos de Archeion.
 
 ## Formato recomendado de `sync_state.json`
 
-El estado de sincronización debe almacenarse separado de `entries.jsonl` para mantener
+El estado de sincronización debe almacenarse separado de `entries_v2.jsonl` para mantener
 la bitácora de operaciones append-only. Una estructura inicial sugerida es:
 
 ```json
@@ -160,7 +162,7 @@ la bitácora de operaciones append-only. Una estructura inicial sugerida es:
       "attempts": 0,
       "last_attempt_at": null,
       "synced_at": null,
-      "codexhub_ingreso_id": null,
+      "archeion_ingreso_id": null,
       "last_error": null
     }
   }
@@ -172,8 +174,8 @@ son:
 
 - `pending`: operación local todavía no enviada o lista para reintento.
 - `syncing`: intento de envío actualmente en curso.
-- `synced`: CodexHub confirmó que la operación quedó registrada o ya existía.
-- `needs_review`: CodexHub recibió la operación, pero requiere revisión humana antes de
+- `synced`: Archeion confirmó que la operación quedó registrada o ya existía.
+- `needs_review`: Archeion recibió la operación, pero requiere revisión humana antes de
   consolidarla.
 - `error`: el último intento falló y requiere reintento o intervención.
 
@@ -182,7 +184,7 @@ Campos de seguimiento:
 - `attempts`: número acumulado de intentos de sincronización.
 - `last_attempt_at`: fecha y hora ISO 8601 timezone-aware del último intento, o `null`.
 - `synced_at`: fecha y hora confirmada de sincronización, o `null`.
-- `codexhub_ingreso_id`: identificador interno devuelto por CodexHub para referencia
+- `archeion_ingreso_id`: identificador interno devuelto por Archeion para referencia
   auxiliar, o `null`.
 - `last_error`: último error útil para diagnóstico, o `null`.
 
@@ -195,13 +197,13 @@ el sistema de archivos lo permita.
 1. `device_entry_id` se genera en Cardputer al crear el registro, antes de cualquier
    intento de sincronización.
 2. `device_entry_id` nunca cambia, incluso después de errores, reinicios o reintentos.
-3. `entries.jsonl` es append-only: una línea confirmada no debe editarse ni eliminarse.
+3. `entries_v2.jsonl` es append-only: una línea confirmada no debe editarse ni eliminarse.
 4. Los registros sincronizados no deben borrarse inmediatamente. Deben conservarse el
    tiempo suficiente para auditoría, recuperación y reintentos seguros.
-5. CodexHub deberá tratar la combinación `device_id + device_entry_id` como llave
+5. Archeion deberá tratar la combinación `device_id + device_entry_id` como llave
    idempotente en el futuro. Reenviar la misma operación no debe crear ingresos
    duplicados.
-6. CodexHub recalculará las comisiones al recibir registros. Los cálculos del dispositivo
+6. Archeion recalculará las comisiones al recibir registros. Los cálculos del dispositivo
    se conservarán como fotografía y podrán compararse para detectar diferencias.
 7. Todos los montos y porcentajes deben viajar como strings decimales; nunca deben
    convertirse a punto flotante para persistencia o transporte.
@@ -215,11 +217,11 @@ el sistema de archivos lo permita.
     resolverse reintentando con el mismo `device_id` y `device_entry_id`, nunca creando
     otro identificador para la misma captura.
 12. Cardputer solo debe marcar una operación como `synced` después de recibir una
-    confirmación explícita de CodexHub.
+    confirmación explícita de Archeion.
 
 ## Alcance pendiente
 
 Este documento no define ni implementa todavía el endpoint de subida, el modelo de
-idempotencia en CodexHub, la resolución de conflictos ni un flujo para corregir
+idempotencia en Archeion, la resolución de conflictos ni un flujo para corregir
 historia. Esos contratos deberán diseñarse antes de habilitar la sincronización de
 operaciones.

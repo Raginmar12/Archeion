@@ -7,7 +7,7 @@ from django.utils import timezone
 from core.models import DeviceToken
 
 
-DEVICE_TOKEN_HEADER = "HTTP_X_CODEX_DEVICE_TOKEN"
+DEVICE_TOKEN_HEADER = "HTTP_X_ARCHEION_DEVICE_TOKEN"
 API_PATH_PREFIX = "/api/"
 
 
@@ -46,7 +46,7 @@ class DeviceTokenMiddleware:
             DeviceToken.objects.filter(pk=token.pk).update(ultimo_uso_en=timezone.now())
             return None
 
-        token_configurado = settings.CODEX_DEVICE_TOKEN
+        token_configurado = settings.ARCHEION_DEVICE_TOKEN
         if token_configurado:
             if token_recibido and compare_digest(token_recibido, token_configurado):
                 return None
