@@ -989,3 +989,108 @@ class TicketPagoTests(TestCase):
 
         self.assertIsInstance(campo, models.OneToOneField)
         self.assertTrue(campo.unique)
+
+
+class SeedChremataCatalogsCommandTests(TestCase):
+    def test_carga_catalogo_inicial_real_de_conceptos(self):
+        from django.core.management import call_command
+
+        call_command("seed_chremata_catalogs", verbosity=0)
+
+        conceptos = ConceptoIngreso.objects.order_by("nombre")
+        self.assertEqual(conceptos.count(), 21)
+
+        consulta = ConceptoIngreso.objects.get(nombre="Consulta médica")
+        self.assertFalse(consulta.permite_material_adicional)
+        self.assertEqual(consulta.monto_material_sugerido, Decimal("0.00"))
+        self.assertEqual(consulta.descripcion, "Precio sugerido en Zephyros: 65.00.")
+
+        curacion = ConceptoIngreso.objects.get(nombre="Curación")
+        self.assertTrue(curacion.permite_material_adicional)
+        self.assertEqual(curacion.monto_material_sugerido, Decimal("0.00"))
+
+        azucar = ConceptoIngreso.objects.get(
+            nombre="Prueba para detectar niveles de azúcar",
+        )
+        self.assertFalse(azucar.permite_material_adicional)
+
+        otro = ConceptoIngreso.objects.get(nombre="Otro")
+        self.assertTrue(otro.permite_material_adicional)
+        self.assertEqual(
+            otro.descripcion,
+            "Captura manual de concepto y monto desde Zephyros.",
+        )
+
+    def test_es_idempotente_y_desactiva_conceptos_obsoletos(self):
+        from django.core.management import call_command
+
+        ConceptoIngreso.objects.create(nombre="Control del niño sano")
+        ConceptoIngreso.objects.create(nombre="Control de embarazo")
+        ConceptoIngreso.objects.create(nombre="Planificación familiar")
+
+        call_command("seed_chremata_catalogs", verbosity=0)
+        primer_total = ConceptoIngreso.objects.count()
+        call_command("seed_chremata_catalogs", verbosity=0)
+
+        self.assertEqual(ConceptoIngreso.objects.count(), primer_total)
+        self.assertEqual(
+            ConceptoIngreso.objects.filter(
+                nombre__in=[
+                    "Control del niño sano",
+                    "Control de embarazo",
+                    "Planificación familiar",
+                ],
+                activo=False,
+            ).count(),
+            3,
+        )
+
+    def test_preserva_monto_material_sugerido_previo_para_curacion_y_retiro_puntos(self):
+        from django.core.management import call_command
+        from chremata.management.commands.seed_chremata_catalogs import (
+            CATALOGO_CONCEPTOS_INGRESO,
+            calcular_public_id_concepto,
+        )
+
+        conceptos_por_nombre = {
+            concepto["nombre"]: concepto for concepto in CATALOGO_CONCEPTOS_INGRESO
+        }
+        for nombre, monto in {
+            "Curación": Decimal("25.00"),
+            "Retiro de puntos": Decimal("15.00"),
+        }.items():
+            concepto = conceptos_por_nombre[nombre]
+            ConceptoIngreso.objects.create(
+                public_id=calcular_public_id_concepto(concepto["clave"]),
+                nombre=nombre,
+                permite_material_adicional=True,
+                monto_material_sugerido=monto,
+            )
+
+        call_command("seed_chremata_catalogs", verbosity=0)
+
+        self.assertEqual(
+            ConceptoIngreso.objects.get(nombre="Curación").monto_material_sugerido,
+            Decimal("25.00"),
+        )
+        self.assertEqual(
+            ConceptoIngreso.objects.get(nombre="Retiro de puntos").monto_material_sugerido,
+            Decimal("15.00"),
+        )
+
+    def test_reutiliza_concepto_existente_por_nombre_sin_duplicarlo(self):
+        from django.core.management import call_command
+
+        curacion = ConceptoIngreso.objects.create(
+            nombre="Curación",
+            permite_material_adicional=True,
+            monto_material_sugerido=Decimal("35.00"),
+        )
+        public_id_original = curacion.public_id
+
+        call_command("seed_chremata_catalogs", verbosity=0)
+
+        curacion.refresh_from_db()
+        self.assertNotEqual(curacion.public_id, public_id_original)
+        self.assertEqual(curacion.monto_material_sugerido, Decimal("35.00"))
+        self.assertEqual(ConceptoIngreso.objects.filter(nombre="Curación").count(), 1)

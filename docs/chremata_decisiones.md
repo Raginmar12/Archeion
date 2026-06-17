@@ -28,3 +28,11 @@ Por ahora no se deben editar registros históricos pasados relacionados con ingr
 comisiones o material, porque pueden alterar fotografías históricas o la secuencia del
 pool. Si se necesita corregir historia, se diseñará después un flujo explícito de
 ajuste, recálculo o reverso contable.
+
+## Precios sugeridos de conceptos
+
+`ConceptoIngreso` todavía no tiene un campo dedicado para precio sugerido. El comando
+`seed_chremata_catalogs` carga el catálogo inicial real de conceptos y documenta el
+precio sugerido en la descripción de cada concepto para que Zephyros lo use como guía.
+El monto oficial se captura en Zephyros en la línea del ticket y Archeion lo consolida
+al recibir la operación correspondiente.
