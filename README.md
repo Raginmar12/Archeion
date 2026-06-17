@@ -22,6 +22,9 @@ Confirmado actualmente:
 - Zephyros usa `archeion_base_url` en `/zephyros/config.json`.
 - Zephyros usa rutas locales bajo `/zephyros/...` y `/zephyros/chremata/...`.
 - Chremata usa `operation` + `operation_contract` para operaciones sincronizadas.
+- El flujo oficial de caja usa `CajaFisica` como caja real con llave y `CajaSesion` como apertura/cierre operativa.
+- `caja_public_id` identifica una `CajaSesion`; `caja_fisica_public_id` identifica una `CajaFisica`.
+- El corte de caja oficial vive en Archeion y se consulta por sesión; no reemplaza el reporte diario y puede cruzar medianoche.
 - `entries_v2.jsonl` es JSONL append-only.
 - `sync_state.json` es JSON normal y mutable.
 - `seed_chremata_catalogs` carga catálogos iniciales solo sobre una base limpia.
@@ -112,7 +115,6 @@ Recomendaciones:
 python manage.py check
 python manage.py test chremata
 git diff --check
-rg -n "CodexHub|X-Codex|/codex|operation_type|ledger" README.md docs -S
 ```
 
 ## Endpoints principales
@@ -125,6 +127,7 @@ Todos los endpoints bajo `/api/` requieren `X-Archeion-Device-Token`.
 | GET | `/api/v1/catalogos/` | Descargar snapshot de catálogos activos para Zephyros. |
 | GET | `/api/v1/chremata/schema/` | Consultar contratos vigentes de sincronización Chremata. |
 | GET | `/api/v1/chremata/material-pool/` | Consultar estado consolidado del material pool. |
+| GET | `/api/v1/chremata/cajas/<caja_public_id>/corte/` | Consultar corte oficial de una sesión de caja. |
 | POST | `/api/v1/chremata/operations/` | Sincronizar operaciones idempotentes desde Zephyros. |
 
 Operaciones Chremata vigentes:
@@ -134,6 +137,8 @@ Operaciones Chremata vigentes:
 - `cancelar_ticket`
 - `abandonar_ticket`
 - `crear_gasto_material`
+- `abrir_caja`
+- `cerrar_caja`
 
 ## Mapa de documentación
 
@@ -145,3 +150,14 @@ Operaciones Chremata vigentes:
 - [`docs/troubleshooting.md`](docs/troubleshooting.md): problemas frecuentes y cómo resolverlos.
 - [`docs/decisiones.md`](docs/decisiones.md): decisiones de diseño consolidadas.
 - [`docs/seguridad.md`](docs/seguridad.md): tokens de dispositivo y seguridad local.
+
+
+## Flujo oficial de caja Chremata
+
+1. Antes de consulta, Zephyros abre una caja con `abrir_caja`, generando una `CajaSesion` asociada opcionalmente a una `CajaFisica`.
+2. Durante consulta, se pueden crear tickets pendientes sin caja; cobrar un ticket en Zephyros requiere caja abierta y debe enviar `caja_public_id`.
+3. Los gastos de material capturados durante la sesión pueden enviar el mismo `caja_public_id`; se reportan aparte en el corte y no reducen el efectivo esperado.
+4. Al final, Zephyros cierra la caja con `cerrar_caja`, enviando el efectivo contado. Archeion calcula y guarda el `resumen_snapshot`.
+5. Después de sincronizar, comparar el corte local auxiliar de Zephyros contra `GET /api/v1/chremata/cajas/<caja_public_id>/corte/`, que es la autoridad.
+
+El corte oficial incluye `caja`, `efectivo`, `totales`, `totales_por_metodo`, `totales_por_canal`, `totales_por_concepto`, `gastos_material` y `tickets`. Los totales por concepto salen de `TicketLinea`, no del concepto resumen del pago.

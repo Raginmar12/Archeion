@@ -7,22 +7,26 @@
 - Confirmar que Zephyros tiene batería y SD accesible.
 - Revisar que `/zephyros/config.json` tenga `archeion_base_url` correcto.
 - Probar conexión con `GET /api/device/ping/` si hubo cambios de red.
-- Descargar catálogos si se actualizaron conceptos, métodos de pago o canales.
+- Descargar catálogos si se actualizaron conceptos, métodos de pago, canales o cajas físicas.
+- Abrir caja en Zephyros antes de iniciar cobros; esto crea una `CajaSesion` para la operación del día o turno.
 
 ## Durante consulta
 
-- Capturar tickets en Zephyros aunque no haya conexión.
+- Capturar tickets pendientes en Zephyros aunque no haya conexión; crear un ticket pendiente puede hacerse sin caja.
 - Evitar reiniciar el dispositivo durante escrituras.
 - No editar manualmente `entries_v2.jsonl` durante operación normal.
 - Si el ticket todavía no se cobró, mantenerlo como pendiente.
-- Cobrar solo cuando realmente se concreta el pago.
+- Cobrar solo cuando realmente se concreta el pago. En Zephyros, cobrar requiere una caja abierta y debe asociar el cobro al `caja_public_id` vigente.
+- Registrar gastos de material durante la sesión con la caja abierta cuando correspondan a esa operación.
 
 ## Después de consulta
 
 - Conectar Zephyros a la misma red local que Archeion.
+- Cerrar caja al final de la consulta o turno, capturando el efectivo contado.
 - Ejecutar sincronización.
 - Revisar que no queden operaciones `pending` o `error` en `sync_state.json`.
 - Revisar en Archeion que los tickets cobrados generaron ingresos.
+- Comparar el corte local auxiliar de Zephyros contra el corte oficial de Archeion en `GET /api/v1/chremata/cajas/<caja_public_id>/corte/`.
 - Respaldar `db.sqlite3` si fue una sesión importante.
 
 ## Probar conexión con laptop
@@ -97,3 +101,14 @@ Guardar respaldos fuera del repositorio si contienen información real.
 - Verificar que no hay operaciones pendientes de sincronizar.
 - Confirmar que las líneas de `entries_v2.jsonl` son JSON válido.
 - Comparar contra Archeion; el servidor es la autoridad de datos.
+
+
+## Flujo recomendado de corte de caja
+
+1. Abrir caja antes de consulta, eligiendo la `CajaFisica` real con llave cuando esté disponible en catálogos.
+2. Crear tickets pendientes conforme se necesite; pueden existir sin caja porque todavía no representan ingreso.
+3. Cobrar tickets únicamente con caja abierta en Zephyros; el cobro pertenece a la `CajaSesion`, no al ticket pendiente.
+4. Registrar gastos de material asociados a la caja si ocurrieron durante la sesión. Estos gastos aparecen aparte en el corte y no reducen el efectivo esperado.
+5. Cerrar caja al final con el efectivo contado.
+6. Sincronizar todas las operaciones pendientes.
+7. Comparar el corte local de Zephyros con el corte oficial de Archeion. Si hay diferencia, Archeion es la fuente de verdad.

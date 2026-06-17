@@ -111,3 +111,62 @@ Si falta el archivo principal:
 - Recuperar operaciones válidas línea por línea.
 - Marcar operaciones dudosas para revisión manual.
 - Evitar pretty-print; JSONL requiere un objeto JSON completo por línea.
+
+
+## `caja_abierta_exists` al abrir caja
+
+Archeion encontró una `CajaSesion` abierta para el mismo `device_id`. Acciones:
+
+- No generar otra caja artificial.
+- Revisar si Zephyros ya había abierto caja y perdió estado local.
+- Consultar o recuperar el `caja_public_id` de la caja abierta antes de seguir cobrando.
+- Si la sesión realmente terminó, cerrarla con `cerrar_caja` y luego abrir una nueva.
+
+## Zephyros perdió `caja_state.json` pero Archeion tiene caja abierta
+
+`caja_state.json` es auxiliar local; la autoridad es Archeion. Acciones:
+
+- No borrar ni reescribir `entries_v2.jsonl`.
+- Buscar en `entries_v2.jsonl` la operación `abrir_caja` sincronizada o pendiente y recuperar su `caja_public_id`.
+- Si no se puede reconstruir localmente, revisar Archeion/admin para identificar la `CajaSesion` abierta del `device_id`.
+- Rehidratar el estado local con ese `caja_public_id` y continuar; si hay duda, cerrar caja y documentar la incidencia.
+
+## Se reinició DB de Archeion pero Zephyros conserva `entries_v2.jsonl`/`caja_state.json`
+
+Esto deja a Zephyros apuntando a UUIDs que pueden no existir en la base limpia de Archeion. Acciones:
+
+- Descargar catálogos otra vez después de `migrate` y `seed_chremata_catalogs`.
+- No sincronizar automáticamente operaciones antiguas contra una base limpia sin revisión.
+- Si `caja_state.json` conserva una caja abierta que Archeion ya no conoce, cerrar o archivar el estado local y abrir una nueva caja sobre la base actual.
+- Esperar errores 422/404 por `caja_public_id`, `caja_fisica_public_id` o catálogos inexistentes si se intenta reenviar historia vieja.
+
+## 422 al sincronizar `abrir_caja` o `cerrar_caja`
+
+Causas frecuentes:
+
+- `abrir_caja`: ya existe caja abierta para el dispositivo (`caja_abierta_exists`).
+- `abrir_caja`: `caja_fisica_public_id` no existe o la caja física está inactiva.
+- `abrir_caja`: `saldo_inicial_efectivo` negativo o inválido.
+- `cerrar_caja`: la caja no está abierta.
+- `cerrar_caja`: `cerrada_en` es anterior a `abierta_en`.
+- `cerrar_caja`: `efectivo_contado_cierre` negativo o inválido.
+
+Acciones: corregir el estado operativo real, mantener el mismo `device_entry_id` para reintentos idempotentes cuando el payload sea el mismo, y marcar para revisión si cambiar el payload altera la operación original.
+
+## Diferencia entre corte local y corte oficial
+
+El corte local de Zephyros es auxiliar. El corte oficial vive en Archeion y se consulta con `GET /api/v1/chremata/cajas/<caja_public_id>/corte/`. Revisar:
+
+- Que todas las operaciones estén `synced`.
+- Que los cobros tengan el `caja_public_id` correcto.
+- Que los totales por concepto en Archeion salen de `TicketLinea`, no del concepto resumen del pago.
+- Que `efectivo_esperado = saldo_inicial_efectivo + total_efectivo`.
+- Que gastos de material se reportan aparte y no restan efectivo esperado.
+
+## Cobros sin caja por compatibilidad temporal
+
+Archeion todavía acepta `cobrar_ticket` y `crear_gasto_material` sin `caja_public_id` por compatibilidad temporal. En operación oficial de Zephyros, cobrar requiere caja abierta. Si aparecen cobros sin caja:
+
+- Revisar versión/configuración de Zephyros.
+- No asumir que aparecerán en un corte de caja específico.
+- Corregir el flujo operativo para abrir caja antes de cobrar.
