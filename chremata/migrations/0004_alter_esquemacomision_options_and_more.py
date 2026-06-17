@@ -4,7 +4,7 @@ from django.db import migrations, models
 
 
 def copiar_canal_a_canales(apps, schema_editor):
-    EsquemaComision = apps.get_model("ledger", "EsquemaComision")
+    EsquemaComision = apps.get_model("chremata", "EsquemaComision")
 
     for esquema in EsquemaComision.objects.exclude(canal_cobro_id__isnull=True):
         esquema.canales_cobro.add(esquema.canal_cobro_id)
@@ -17,7 +17,7 @@ def noop_reverse(apps, schema_editor):
 class Migration(migrations.Migration):
 
     dependencies = [
-        ("ledger", "0003_backfill_monto_neto"),
+        ("chremata", "0003_backfill_monto_neto"),
     ]
 
     operations = [
@@ -35,7 +35,7 @@ class Migration(migrations.Migration):
             field=models.ManyToManyField(
                 blank=True,
                 related_name="esquemas_comision",
-                to="ledger.canalcobro",
+                to="chremata.canalcobro",
             ),
         ),
         migrations.RunPython(copiar_canal_a_canales, noop_reverse),

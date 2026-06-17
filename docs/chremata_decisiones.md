@@ -1,18 +1,17 @@
-# Decisiones de Ledger
+# Decisiones de Chremata
 
 ## Montos de un ingreso
 
 `Ingreso.monto_procedimiento` representa el precio base del procedimiento o servicio.
 `Ingreso.monto_material_cobrado` representa exclusivamente el monto de material
-adicional cobrado por separado. `Ingreso.monto_total` representa el total cobrado al
-paciente y se calcula como la suma del procedimiento y el material adicional.
+adicional cobrado por separado. `Ingreso.monto_total` representa el total cobrado y se calcula como la suma del procedimiento y el material adicional.
 
 Las comisiones se calculan sobre `monto_total`, y `monto_neto` representa el total
 cobrado menos la comisión aplicada.
 
 ## Material como pool económico
 
-Ledger no maneja inventario de material. El material se representa únicamente como un
+Chremata no maneja inventario de material. El material se representa únicamente como un
 pool económico que permite comparar los gastos de material registrados contra los
 cobros explícitos destinados a recuperarlos.
 

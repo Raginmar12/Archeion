@@ -13,9 +13,9 @@ No agregar expedientes de pacientes, diagnósticos, tratamientos, recetas, labor
 
 ## Alcance actual
 
-El módulo activo actual es `ledger`.
+El módulo activo actual es `chremata`.
 
-Ledger v0.1 se enfoca en registrar ingresos y entender ingreso bruto, métodos de pago, canales de cobro, comisiones e ingreso neto.
+Chremata v0.1 se enfoca en registrar ingresos y entender ingreso bruto, métodos de pago, canales de cobro, comisiones e ingreso neto.
 
 Conceptos centrales actuales:
 
@@ -75,4 +75,4 @@ Antes de terminar una tarea, ejecutar:
 
 ```bash
 python manage.py check
-python manage.py test ledger
+python manage.py test chremata

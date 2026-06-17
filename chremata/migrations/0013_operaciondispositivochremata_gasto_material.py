@@ -7,7 +7,7 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
 
     dependencies = [
-        ("ledger", "0012_operaciondispositivochremata"),
+        ("chremata", "0012_operaciondispositivochremata"),
     ]
 
     operations = [
@@ -19,7 +19,7 @@ class Migration(migrations.Migration):
                 null=True,
                 on_delete=django.db.models.deletion.PROTECT,
                 related_name="operaciones_dispositivo",
-                to="ledger.gastomaterial",
+                to="chremata.gastomaterial",
             ),
         ),
     ]

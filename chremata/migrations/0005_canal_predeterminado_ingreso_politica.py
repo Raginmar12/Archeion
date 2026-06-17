@@ -7,7 +7,7 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
 
     dependencies = [
-        ("ledger", "0004_alter_esquemacomision_options_and_more"),
+        ("chremata", "0004_alter_esquemacomision_options_and_more"),
     ]
 
     operations = [
@@ -19,7 +19,7 @@ class Migration(migrations.Migration):
                 null=True,
                 on_delete=django.db.models.deletion.PROTECT,
                 related_name="canales_predeterminados",
-                to="ledger.esquemacomision",
+                to="chremata.esquemacomision",
             ),
         ),
         migrations.RemoveField(
@@ -32,7 +32,7 @@ class Migration(migrations.Migration):
             field=models.ForeignKey(
                 on_delete=django.db.models.deletion.PROTECT,
                 related_name="ingresos",
-                to="ledger.canalcobro",
+                to="chremata.canalcobro",
             ),
         ),
     ]

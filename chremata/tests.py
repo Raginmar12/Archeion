@@ -98,7 +98,7 @@ class CatalogosPublicIdTests(TestCase):
                 self.assertIn("public_id", admin.site._registry[modelo].readonly_fields)
 
 
-class LedgerComisionesTests(TestCase):
+class ChremataComisionesTests(TestCase):
     def setUp(self):
         self.metodo_tarjeta = MetodoPago.objects.create(nombre="Tarjeta")
         self.metodo_efectivo = MetodoPago.objects.create(nombre="Efectivo")

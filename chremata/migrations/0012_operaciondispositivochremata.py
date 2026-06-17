@@ -7,7 +7,7 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
 
     dependencies = [
-        ("ledger", "0011_ticketpago"),
+        ("chremata", "0011_ticketpago"),
     ]
 
     operations = [
@@ -54,7 +54,7 @@ class Migration(migrations.Migration):
                         null=True,
                         on_delete=django.db.models.deletion.PROTECT,
                         related_name="operaciones_dispositivo",
-                        to="ledger.ingreso",
+                        to="chremata.ingreso",
                     ),
                 ),
                 (
@@ -64,7 +64,7 @@ class Migration(migrations.Migration):
                         null=True,
                         on_delete=django.db.models.deletion.PROTECT,
                         related_name="operaciones_dispositivo",
-                        to="ledger.ticket",
+                        to="chremata.ticket",
                     ),
                 ),
                 (
@@ -74,7 +74,7 @@ class Migration(migrations.Migration):
                         null=True,
                         on_delete=django.db.models.deletion.PROTECT,
                         related_name="operaciones_dispositivo",
-                        to="ledger.ticketpago",
+                        to="chremata.ticketpago",
                     ),
                 ),
             ],

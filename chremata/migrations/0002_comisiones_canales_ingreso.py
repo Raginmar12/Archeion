@@ -8,7 +8,7 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
 
     dependencies = [
-        ("ledger", "0001_initial"),
+        ("chremata", "0001_initial"),
     ]
 
     operations = [
@@ -20,7 +20,7 @@ class Migration(migrations.Migration):
                 ("activo", models.BooleanField(default=True)),
                 ("creado_en", models.DateTimeField(auto_now_add=True)),
                 ("actualizado_en", models.DateTimeField(auto_now=True)),
-                ("metodo_pago", models.ForeignKey(on_delete=django.db.models.deletion.PROTECT, related_name="canales_cobro", to="ledger.metodopago")),
+                ("metodo_pago", models.ForeignKey(on_delete=django.db.models.deletion.PROTECT, related_name="canales_cobro", to="chremata.metodopago")),
             ],
             options={
                 "verbose_name": "canal de cobro",
@@ -41,7 +41,7 @@ class Migration(migrations.Migration):
                 ("notas", models.TextField(blank=True)),
                 ("creado_en", models.DateTimeField(auto_now_add=True)),
                 ("actualizado_en", models.DateTimeField(auto_now=True)),
-                ("canal_cobro", models.ForeignKey(on_delete=django.db.models.deletion.PROTECT, related_name="esquemas_comision", to="ledger.canalcobro")),
+                ("canal_cobro", models.ForeignKey(on_delete=django.db.models.deletion.PROTECT, related_name="esquemas_comision", to="chremata.canalcobro")),
             ],
             options={
                 "verbose_name": "esquema de comisión",
@@ -57,12 +57,12 @@ class Migration(migrations.Migration):
         migrations.AddField(
             model_name="ingreso",
             name="canal_cobro",
-            field=models.ForeignKey(blank=True, null=True, on_delete=django.db.models.deletion.PROTECT, related_name="ingresos", to="ledger.canalcobro"),
+            field=models.ForeignKey(blank=True, null=True, on_delete=django.db.models.deletion.PROTECT, related_name="ingresos", to="chremata.canalcobro"),
         ),
         migrations.AddField(
             model_name="ingreso",
             name="esquema_comision",
-            field=models.ForeignKey(blank=True, null=True, on_delete=django.db.models.deletion.PROTECT, related_name="ingresos", to="ledger.esquemacomision"),
+            field=models.ForeignKey(blank=True, null=True, on_delete=django.db.models.deletion.PROTECT, related_name="ingresos", to="chremata.esquemacomision"),
         ),
         migrations.AddField(
             model_name="ingreso",

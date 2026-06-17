@@ -6,7 +6,7 @@ from django.db import migrations, models
 
 
 def backfill_monto_neto(apps, schema_editor):
-    Ingreso = apps.get_model("ledger", "Ingreso")
+    Ingreso = apps.get_model("chremata", "Ingreso")
     Ingreso.objects.all().update(
         comision=Decimal("0.00"),
         porcentaje_comision_aplicado=Decimal("0.0000"),
@@ -21,7 +21,7 @@ def noop_reverse(apps, schema_editor):
 class Migration(migrations.Migration):
 
     dependencies = [
-        ("ledger", "0002_comisiones_canales_ingreso"),
+        ("chremata", "0002_comisiones_canales_ingreso"),
     ]
 
     operations = [
