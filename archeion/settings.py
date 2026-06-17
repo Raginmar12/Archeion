@@ -28,7 +28,12 @@ DEBUG = True
 
 ARCHEION_DEVICE_TOKEN = os.environ.get("ARCHEION_DEVICE_TOKEN", "")
 
-ALLOWED_HOSTS = ["archeion.local", "localhost", "127.0.0.1", "192.168.100.13"]
+DEFAULT_ALLOWED_HOSTS = "127.0.0.1,localhost,archeion,archeion.local"
+ALLOWED_HOSTS = [
+    host.strip()
+    for host in os.environ.get("ALLOWED_HOSTS", DEFAULT_ALLOWED_HOSTS).split(",")
+    if host.strip()
+]
 
 
 # Application definition
