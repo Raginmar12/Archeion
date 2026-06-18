@@ -6,14 +6,17 @@
 <section class="page-heading">
   <div>
     <h1>Chremata</h1>
-    <p>Resumen operativo local del {{ fecha_hoy|date:"Y-m-d" }}</p>
+    <p>Resumen para revisión en casa del {{ fecha_hoy|date:"Y-m-d" }}</p>
     <p class="muted">Zona horaria: {{ timezone_actual }}</p>
   </div>
   <nav class="quick-links" aria-label="Accesos principales">
-    <a class="button-link" href="{% url 'chremata_reporte_diario' %}">Reporte diario</a>
-    <a class="button-link" href="{% url 'chremata_reporte_semana' %}">Reporte semanal</a>
-    <a class="button-link" href="{% url 'chremata_reporte_mes' %}">Reporte mensual</a>
-    <a class="button-link" href="{% url 'chremata_reporte_anio' %}">Reporte anual</a>
+    <a class="button-link" href="{% url 'chremata_reporte_diario' %}?fecha={{ fecha_hoy|date:'Y-m-d' }}">Ver reporte de hoy</a>
+    <a class="button-link" href="{% url 'chremata_reporte_semana' %}?fecha={{ fecha_hoy|date:'Y-m-d' }}">Ver esta semana</a>
+    <a class="button-link" href="{% url 'chremata_reporte_mes' %}?anio={{ fecha_hoy|date:'Y' }}&mes={{ fecha_hoy|date:'n' }}">Ver este mes</a>
+    <a class="button-link" href="{% url 'chremata_reporte_anio' %}?anio={{ fecha_hoy|date:'Y' }}">Ver este año</a>
+    {% if caja_resumen %}
+      <a class="button-link secondary" href="{% url 'chremata_caja_detalle' caja_resumen.public_id %}">{% if caja_abierta %}Ver caja abierta{% else %}Ver última caja{% endif %}</a>
+    {% endif %}
     <a class="button-link secondary" href="{% url 'admin:index' %}">Admin</a>
   </nav>
 </section>
@@ -23,13 +26,11 @@
     <h2>Hoy</h2>
     <dl class="metric-list">
       <div><dt>Ingresos cobrados</dt><dd>${{ reporte_hoy.totales.total_ingresos_cobrados }}</dd></div>
-      <div><dt>Neto operativo básico</dt><dd>${{ reporte_hoy.totales.neto_operativo_basico }}</dd></div>
+      <div><dt>Comisiones de cobro</dt><dd>${{ reporte_hoy.totales.total_comisiones_cobro }}</dd></div>
       <div><dt>Después de comisiones</dt><dd>${{ reporte_hoy.totales.total_neto_despues_comisiones }}</dd></div>
-      <div><dt>Tickets cobrados</dt><dd>{{ reporte_hoy.actividad.tickets_cobrados }}</dd></div>
       <div><dt>Costo de material</dt><dd>${{ reporte_hoy.totales.total_costo_material }}</dd></div>
-      <div class="secondary-metric"><dt>Utilidad bruta estimada</dt><dd>${{ reporte_hoy.totales.utilidad_bruta_estimada }}</dd></div>
-      <div class="secondary-metric"><dt>Comisiones de cobro</dt><dd>${{ reporte_hoy.totales.total_comisiones_cobro }}</dd></div>
-      <div class="secondary-metric"><dt>Balance material</dt><dd>${{ reporte_hoy.totales.balance_material_periodo }}</dd></div>
+      <div class="primary-result"><dt>Neto operativo básico</dt><dd>${{ reporte_hoy.totales.neto_operativo_basico }}</dd></div>
+      <div class="auxiliary-metric"><dt>Balance material del periodo</dt><dd>${{ reporte_hoy.totales.balance_material_periodo }}</dd></div>
     </dl>
     <a href="{% url 'chremata_reporte_diario' %}?fecha={{ fecha_hoy|date:'Y-m-d' }}">Ver reporte diario</a>
   </article>
@@ -38,13 +39,11 @@
     <h2>Esta semana</h2>
     <dl class="metric-list">
       <div><dt>Ingresos cobrados</dt><dd>${{ reporte_semana.totales.total_ingresos_cobrados }}</dd></div>
-      <div><dt>Neto operativo básico</dt><dd>${{ reporte_semana.totales.neto_operativo_basico }}</dd></div>
+      <div><dt>Comisiones de cobro</dt><dd>${{ reporte_semana.totales.total_comisiones_cobro }}</dd></div>
       <div><dt>Después de comisiones</dt><dd>${{ reporte_semana.totales.total_neto_despues_comisiones }}</dd></div>
-      <div><dt>Tickets cobrados</dt><dd>{{ reporte_semana.actividad.tickets_cobrados }}</dd></div>
       <div><dt>Costo de material</dt><dd>${{ reporte_semana.totales.total_costo_material }}</dd></div>
-      <div class="secondary-metric"><dt>Utilidad bruta estimada</dt><dd>${{ reporte_semana.totales.utilidad_bruta_estimada }}</dd></div>
-      <div class="secondary-metric"><dt>Comisiones de cobro</dt><dd>${{ reporte_semana.totales.total_comisiones_cobro }}</dd></div>
-      <div class="secondary-metric"><dt>Balance material</dt><dd>${{ reporte_semana.totales.balance_material_periodo }}</dd></div>
+      <div class="primary-result"><dt>Neto operativo básico</dt><dd>${{ reporte_semana.totales.neto_operativo_basico }}</dd></div>
+      <div class="auxiliary-metric"><dt>Balance material del periodo</dt><dd>${{ reporte_semana.totales.balance_material_periodo }}</dd></div>
     </dl>
   </article>
 
@@ -52,13 +51,11 @@
     <h2>Este mes</h2>
     <dl class="metric-list">
       <div><dt>Ingresos cobrados</dt><dd>${{ reporte_mes.totales.total_ingresos_cobrados }}</dd></div>
-      <div><dt>Neto operativo básico</dt><dd>${{ reporte_mes.totales.neto_operativo_basico }}</dd></div>
+      <div><dt>Comisiones de cobro</dt><dd>${{ reporte_mes.totales.total_comisiones_cobro }}</dd></div>
       <div><dt>Después de comisiones</dt><dd>${{ reporte_mes.totales.total_neto_despues_comisiones }}</dd></div>
-      <div><dt>Tickets cobrados</dt><dd>{{ reporte_mes.actividad.tickets_cobrados }}</dd></div>
       <div><dt>Costo de material</dt><dd>${{ reporte_mes.totales.total_costo_material }}</dd></div>
-      <div class="secondary-metric"><dt>Utilidad bruta estimada</dt><dd>${{ reporte_mes.totales.utilidad_bruta_estimada }}</dd></div>
-      <div class="secondary-metric"><dt>Comisiones de cobro</dt><dd>${{ reporte_mes.totales.total_comisiones_cobro }}</dd></div>
-      <div class="secondary-metric"><dt>Balance material</dt><dd>${{ reporte_mes.totales.balance_material_periodo }}</dd></div>
+      <div class="primary-result"><dt>Neto operativo básico</dt><dd>${{ reporte_mes.totales.neto_operativo_basico }}</dd></div>
+      <div class="auxiliary-metric"><dt>Balance material del periodo</dt><dd>${{ reporte_mes.totales.balance_material_periodo }}</dd></div>
     </dl>
   </article>
 
@@ -112,7 +109,7 @@
         {% endfor %}
       </ul>
     {% else %}
-      <p class="empty">Sin cobros recientes.</p>
+      <p class="empty">Sin actividad reciente de cobros.</p>
     {% endif %}
   </article>
 
@@ -130,7 +127,7 @@
         {% endfor %}
       </ul>
     {% else %}
-      <p class="empty">Sin gastos recientes.</p>
+      <p class="empty">Sin actividad reciente de gastos.</p>
     {% endif %}
   </article>
 </section>

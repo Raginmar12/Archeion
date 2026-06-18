@@ -137,14 +137,29 @@ del endpoint API usado por Zephyros.
 Nomenclatura contable visible:
 
 - **Ingresos cobrados** = total cobrado del periodo.
-- **Costo de material** = gastos de material del periodo.
-- **Utilidad bruta estimada** = ingresos cobrados - costo de material.
-- **Comisiones de cobro** = comisiones de canal/procesador.
-- **Neto operativo básico** = ingresos cobrados - costo de material - comisiones de cobro.
-- **Balance material del periodo** = material cobrado - costo de material.
+- − **Comisiones de cobro** = comisiones de canal/procesador.
+- = **Después de comisiones** = ingresos cobrados - comisiones de cobro.
+- − **Costo de material** = gastos de material del periodo.
+- = **Neto operativo básico** = ingresos cobrados - costo de material - comisiones de cobro.
+- **Balance material del periodo** = métrica auxiliar: material cobrado - costo de material.
 
 El neto operativo básico no es ganancia final real: todavía no descuenta renta,
 gasolina, equipo, mantenimiento, impuestos ni otros gastos no registrados.
+
+### Revisión local Chremata R6
+
+Archeion web está pensado para consultarse desde casa o desde la red local, no para exponerse directamente a internet. Zephyros/Cardputer es el dispositivo de campo para capturar durante consulta, incluso offline, y Chremata web en Archeion sirve para revisar después de sincronizar.
+
+La identidad visual de Chremata web sigue a Zephyros/Chremata: verde petróleo como base, cobre como acento y texto marfil para mantener lectura cómoda en teléfono.
+
+Flujo recomendado:
+
+1. Capturar en Zephyros durante consulta.
+2. Sincronizar con Archeion al volver o al tener red local.
+3. Revisar `/chremata/` desde el teléfono en casa.
+4. Revisar día, semana, mes, año y corte de caja.
+
+No exponer Archeion directamente a internet; mantenerlo protegido por login dentro de la LAN.
 
 ## Endpoints principales
 

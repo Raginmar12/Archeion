@@ -6,11 +6,15 @@
 <section class="page-heading">
   <div>
     <h1>{{ titulo }}</h1>
+    <p><strong>Reporte calendario</strong></p>
     <p class="muted">
       Periodo: {{ reporte.periodo.inicio }} → {{ reporte.periodo.fin }} ·
       Zona horaria: {{ reporte.periodo.timezone }}
     </p>
   </div>
+  <nav class="quick-links" aria-label="Acciones de reporte">
+    <a class="button-link secondary" href="{% url 'chremata_dashboard' %}">Volver al dashboard</a>
+  </nav>
   {% if tipo_periodo == "semana" %}
     <form class="date-form" method="get">
       <label for="fecha">Fecha dentro de la semana</label>
@@ -38,15 +42,15 @@
 <nav class="period-nav" aria-label="Navegación de periodo">
   {% if tipo_periodo == "semana" %}
     <a href="?fecha={{ fecha_anterior|date:'Y-m-d' }}">Semana anterior</a>
-    <a href="?fecha={{ fecha_hoy|date:'Y-m-d' }}">Semana actual</a>
+    <a href="?fecha={{ fecha_hoy|date:'Y-m-d' }}">Esta semana</a>
     <a href="?fecha={{ fecha_siguiente|date:'Y-m-d' }}">Semana siguiente</a>
   {% elif tipo_periodo == "mes" %}
     <a href="?anio={{ mes_anterior_anio }}&mes={{ mes_anterior_mes }}">Mes anterior</a>
-    <a href="?anio={{ hoy_anio }}&mes={{ hoy_mes }}">Mes actual</a>
+    <a href="?anio={{ hoy_anio }}&mes={{ hoy_mes }}">Este mes</a>
     <a href="?anio={{ mes_siguiente_anio }}&mes={{ mes_siguiente_mes }}">Mes siguiente</a>
   {% elif tipo_periodo == "anio" %}
     <a href="?anio={{ anio_anterior }}">Año anterior</a>
-    <a href="?anio={{ hoy_anio }}">Año actual</a>
+    <a href="?anio={{ hoy_anio }}">Este año</a>
     <a href="?anio={{ anio_siguiente }}">Año siguiente</a>
   {% endif %}
 </nav>
@@ -57,30 +61,22 @@
     <strong>${{ reporte.totales.total_ingresos_cobrados }}</strong>
   </article>
   <article class="card">
-    <span>Utilidad bruta estimada</span>
-    <strong>${{ reporte.totales.utilidad_bruta_estimada }}</strong>
-  </article>
-  <article class="card">
     <span>Comisiones de cobro</span>
     <strong>${{ reporte.totales.total_comisiones_cobro }}</strong>
   </article>
   <article class="card">
-    <span>Neto operativo básico</span>
-    <strong>${{ reporte.totales.neto_operativo_basico }}</strong>
-  </article>
-  <article class="card secondary-metric">
     <span>Después de comisiones</span>
     <strong>${{ reporte.totales.total_neto_despues_comisiones }}</strong>
-  </article>
-  <article class="card">
-    <span>Material cobrado</span>
-    <strong>${{ reporte.totales.total_material_cobrado }}</strong>
   </article>
   <article class="card">
     <span>Costo de material</span>
     <strong>${{ reporte.totales.total_costo_material }}</strong>
   </article>
-  <article class="card">
+  <article class="card primary-result">
+    <span>Neto operativo básico</span>
+    <strong>${{ reporte.totales.neto_operativo_basico }}</strong>
+  </article>
+  <article class="card auxiliary-metric">
     <span>Balance material del periodo</span>
     <strong>${{ reporte.totales.balance_material_periodo }}</strong>
   </article>
@@ -108,7 +104,7 @@
       </table>
     </div>
   {% else %}
-    <p class="empty">Sin datos para este periodo.</p>
+    <p class="empty">Sin cobros en este periodo.</p>
   {% endif %}
 </section>
 
@@ -126,7 +122,7 @@
       </table>
     </div>
   {% else %}
-    <p class="empty">Sin datos para este periodo.</p>
+    <p class="empty">Sin cobros en este periodo.</p>
   {% endif %}
 </section>
 
@@ -144,7 +140,7 @@
       </table>
     </div>
   {% else %}
-    <p class="empty">Sin datos para este periodo.</p>
+    <p class="empty">Sin datos por concepto.</p>
   {% endif %}
 </section>
 
@@ -162,7 +158,7 @@
       </table>
     </div>
   {% else %}
-    <p class="empty">Sin datos para este periodo.</p>
+    <p class="empty">Sin datos por origen en este periodo.</p>
   {% endif %}
 </section>
 
@@ -181,7 +177,7 @@
       </table>
     </div>
   {% else %}
-    <p class="empty">Sin datos para este periodo.</p>
+    <p class="empty">Sin gastos de material en este periodo.</p>
   {% endif %}
 </section>
 
@@ -199,7 +195,7 @@
       </table>
     </div>
   {% else %}
-    <p class="empty">Sin datos para este periodo.</p>
+    <p class="empty">Sin cajas relacionadas.</p>
   {% endif %}
 </section>
 {% endblock %}

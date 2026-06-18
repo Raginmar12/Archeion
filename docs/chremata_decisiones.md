@@ -55,11 +55,15 @@ importe bruto, procedimiento, material cobrado, material recuperado, material
 excedente y comisiones. Las comisiones no se recalculan en el reporte; se leen
 las fotografías congeladas guardadas en cada ingreso.
 
-En reportes Chremata, los totales se nombran así:
+En reportes Chremata, los totales visibles principales se presentan en este orden operativo:
 
-- Después de comisiones = ingresos cobrados - comisiones de cobro.
-- Neto operativo básico = ingresos cobrados - costo de material - comisiones de cobro.
-- Balance material del periodo = material cobrado - gastos de material.
+- Ingresos cobrados.
+- − Comisiones de cobro.
+- = Después de comisiones.
+- − Costo de material.
+- = Neto operativo básico.
+
+Balance material del periodo queda como métrica auxiliar y significa material cobrado - costo de material.
 
 El neto operativo básico todavía no descuenta renta, gasolina, equipo,
 mantenimiento, impuestos ni otros gastos no registrados como gasto de material del

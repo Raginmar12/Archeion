@@ -168,16 +168,32 @@ El dashboard enlaza a los reportes HTML diario, semanal, mensual y anual. Si hay
 caja abierta o una última caja, también enlaza a su corte HTML en `/chremata/cajas/<public_id>/`.
 El corte HTML es una vista humana; el endpoint API de corte sigue existiendo para integración.
 
+### Revisión local Chremata R6
+
+Archeion web está pensado para consultarse desde casa o desde la red local, no para exponerse directamente a internet. Zephyros/Cardputer es el dispositivo de campo para capturar durante consulta, incluso offline, y Chremata web en Archeion sirve para revisar después de sincronizar.
+
+La identidad visual de Chremata web sigue a Zephyros/Chremata: verde petróleo como base, cobre como acento y texto marfil para mantener lectura cómoda en teléfono.
+
+Flujo recomendado:
+
+1. Capturar en Zephyros durante consulta.
+2. Sincronizar con Archeion al volver o al tener red local.
+3. Revisar `/chremata/` desde el teléfono en casa.
+4. Revisar día, semana, mes, año y corte de caja.
+
+No exponer Archeion directamente a internet; mantenerlo protegido por login dentro de la LAN.
+
 ### Lectura de métricas monetarias
 
-En los reportes y el dashboard de Chremata:
+En los reportes y el dashboard de Chremata, la presentación operativa se lee como un mini estado de resultados básico:
 
 - **Ingresos cobrados** = total cobrado del periodo.
-- **Costo de material** = gastos de material registrados por fecha del periodo.
-- **Utilidad bruta estimada** = ingresos cobrados - costo de material.
-- **Comisiones de cobro** = comisiones de canal o procesador guardadas en los ingresos.
-- **Neto operativo básico** = ingresos cobrados - costo de material - comisiones de cobro.
-- **Balance material del periodo** = material cobrado - costo de material.
+- − **Comisiones de cobro** = comisiones de canal o procesador guardadas en los ingresos.
+- = **Después de comisiones** = ingresos cobrados - comisiones de cobro.
+- − **Costo de material** = gastos de material registrados por fecha del periodo.
+- = **Neto operativo básico** = ingresos cobrados - costo de material - comisiones de cobro.
+
+**Balance material del periodo** es una métrica auxiliar: material cobrado - costo de material.
 
 El balance material no es una utilidad: solo compara lo cobrado para recuperar
 material contra lo gastado en material dentro del mismo periodo. El neto operativo
