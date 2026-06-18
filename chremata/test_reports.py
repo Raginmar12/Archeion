@@ -319,6 +319,11 @@ class ReporteChremataPeriodoTests(TestCase):
         )
         self.assertEqual(reporte["totales"]["total_neto_estimado"], "1005.00")
         self.assertEqual(reporte["totales"]["total_neto_ganado"], "906.00")
+        self.assertEqual(reporte["totales"]["total_ingresos_cobrados"], "1005.00")
+        self.assertEqual(reporte["totales"]["total_costo_material"], "99.00")
+        self.assertEqual(reporte["totales"]["utilidad_bruta_estimada"], "906.00")
+        self.assertEqual(reporte["totales"]["total_comisiones_cobro"], "0.00")
+        self.assertEqual(reporte["totales"]["neto_operativo_basico"], "906.00")
         self.assertEqual(reporte["totales"]["balance_material_periodo"], "-19.00")
 
     def test_neto_ganado_resta_comisiones_y_gastos_material(self):
@@ -347,6 +352,11 @@ class ReporteChremataPeriodoTests(TestCase):
         )
         self.assertEqual(reporte["totales"]["total_neto_estimado"], "965.00")
         self.assertEqual(reporte["totales"]["total_neto_ganado"], "865.00")
+        self.assertEqual(reporte["totales"]["total_ingresos_cobrados"], "1000.00")
+        self.assertEqual(reporte["totales"]["total_costo_material"], "100.00")
+        self.assertEqual(reporte["totales"]["utilidad_bruta_estimada"], "900.00")
+        self.assertEqual(reporte["totales"]["total_comisiones_cobro"], "35.00")
+        self.assertEqual(reporte["totales"]["neto_operativo_basico"], "865.00")
 
     def test_limites_inicio_incluyente_fin_excluyente(self):
         inicio, fin = construir_periodo_dia(date(2026, 6, 18))
@@ -483,15 +493,20 @@ class ReporteDiarioViewTests(TestCase):
             },
             "totales": {
                 "total_bruto": "0.00",
+                "total_ingresos_cobrados": "0.00",
                 "total_procedimiento": "0.00",
                 "total_material_cobrado": "0.00",
                 "total_material_recuperado": "0.00",
                 "total_material_excedente": "0.00",
                 "total_comisiones": "0.00",
+                "total_comisiones_cobro": "0.00",
                 "total_neto_despues_comisiones": "0.00",
                 "total_neto_estimado": "0.00",
                 "total_neto_ganado": "0.00",
                 "total_gastos_material": "0.00",
+                "total_costo_material": "0.00",
+                "utilidad_bruta_estimada": "0.00",
+                "neto_operativo_basico": "0.00",
                 "balance_material_periodo": "0.00",
             },
             "actividad": {
@@ -750,7 +765,7 @@ class ReporteDiarioViewTests(TestCase):
         self.assertContains(response, "Efectivo")
         self.assertContains(response, "Consultorio")
 
-    def test_reporte_diario_muestra_neto_ganado_y_no_neto_estimado_como_tarjeta(self):
+    def test_reporte_diario_muestra_neto_operativo_basico_y_no_neto_estimado_como_tarjeta(self):
         self.login()
 
         response = self.client.get(
@@ -759,6 +774,56 @@ class ReporteDiarioViewTests(TestCase):
         )
 
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Neto ganado")
-        self.assertContains(response, "Neto después de comisiones")
+        self.assertContains(response, "Neto operativo básico")
+        self.assertContains(response, "Después de comisiones")
+        self.assertNotContains(response, "Neto ganado")
         self.assertNotContains(response, "Total neto estimado")
+
+
+    def test_reportes_periodo_url_names_resuelven(self):
+        self.assertEqual(resolve("/chremata/reportes/semana/").url_name, "chremata_reporte_semana")
+        self.assertEqual(resolve("/chremata/reportes/mes/").url_name, "chremata_reporte_mes")
+        self.assertEqual(resolve("/chremata/reportes/anio/").url_name, "chremata_reporte_anio")
+
+    def test_reportes_periodo_no_autenticados_redirigen_a_login(self):
+        for name, path in (
+            ("chremata_reporte_semana", "/chremata/reportes/semana/"),
+            ("chremata_reporte_mes", "/chremata/reportes/mes/"),
+            ("chremata_reporte_anio", "/chremata/reportes/anio/"),
+        ):
+            with self.subTest(name=name):
+                response = self.client.get(reverse(name))
+                self.assertEqual(response.status_code, 302)
+                self.assertIn("/accounts/login/", response["Location"])
+                self.assertIn(f"next={path}", response["Location"])
+
+    def test_reportes_periodo_autenticados_y_parametros(self):
+        self.login()
+        casos = (
+            ("chremata_reporte_semana", {"fecha": "2026-06-18"}, "semana", "Reporte semanal Chremata"),
+            ("chremata_reporte_mes", {"anio": "2026", "mes": "6"}, "mes", "Reporte mensual Chremata"),
+            ("chremata_reporte_anio", {"anio": "2026"}, "anio", "Reporte anual Chremata"),
+        )
+        for name, params, tipo, titulo in casos:
+            with self.subTest(name=name):
+                with patch("chremata.views.calcular_reporte_chremata_periodo", return_value=self.reporte_fake()) as calcular_reporte:
+                    response = self.client.get(reverse(name), params)
+                self.assertEqual(response.status_code, 200)
+                self.assertTemplateUsed(response, "chremata/reportes/periodo.html")
+                self.assertContains(response, titulo)
+                self.assertContains(response, "Neto operativo básico")
+                self.assertContains(response, "Sin datos para este periodo.")
+                self.assertEqual(calcular_reporte.call_args.kwargs["tipo_periodo"], tipo)
+
+    def test_reportes_periodo_parametros_invalidos_no_rompen(self):
+        self.login()
+        for name, params, texto in (
+            ("chremata_reporte_semana", {"fecha": "x"}, "La fecha indicada no tiene formato válido"),
+            ("chremata_reporte_mes", {"anio": "x", "mes": "99"}, "El mes o año indicado no tiene formato válido"),
+            ("chremata_reporte_anio", {"anio": "x"}, "El año indicado no tiene formato válido"),
+        ):
+            with self.subTest(name=name):
+                response = self.client.get(reverse(name), params)
+                self.assertEqual(response.status_code, 200)
+                self.assertContains(response, texto)
+                self.assertNotContains(response, "/chremata/cajas/")

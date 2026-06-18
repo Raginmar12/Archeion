@@ -307,3 +307,8 @@ th { color: var(--muted); }
   color: var(--muted);
   font-size: 0.92rem;
 }
+
+.secondary-metric {
+  color: var(--muted);
+  font-size: 0.94rem;
+}

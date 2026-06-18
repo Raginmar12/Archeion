@@ -7,6 +7,7 @@ from django.utils import timezone
 from .models import CajaSesion, GastoMaterial, TicketPago
 from .reports import (
     calcular_reporte_chremata_periodo,
+    construir_periodo_anio,
     construir_periodo_dia,
     construir_periodo_mes,
     construir_periodo_semana,
@@ -106,3 +107,112 @@ def reporte_diario(request):
         "reporte": reporte,
     }
     return render(request, "chremata/reportes/dia.html", contexto)
+
+
+def _periodo_contexto(titulo, tipo_periodo, inicio, fin, advertencia="", **extra):
+    reporte = calcular_reporte_chremata_periodo(inicio, fin, tipo_periodo=tipo_periodo)
+    contexto = {
+        "titulo": titulo,
+        "tipo_periodo": tipo_periodo,
+        "advertencia": advertencia,
+        "reporte": reporte,
+    }
+    contexto.update(extra)
+    return contexto
+
+
+@login_required
+def reporte_semana(request):
+    fecha_param = request.GET.get("fecha")
+    advertencia = ""
+    if fecha_param:
+        try:
+            fecha_consultada = date.fromisoformat(fecha_param)
+        except ValueError:
+            fecha_consultada = timezone.localdate()
+            advertencia = (
+                "La fecha indicada no tiene formato válido. "
+                "Se muestra la semana local actual."
+            )
+    else:
+        fecha_consultada = timezone.localdate()
+
+    inicio, fin = construir_periodo_semana(fecha_consultada)
+    contexto = _periodo_contexto(
+        "Reporte semanal Chremata",
+        "semana",
+        inicio,
+        fin,
+        advertencia,
+        fecha_consultada=fecha_consultada,
+        fecha_anterior=fecha_consultada - timedelta(days=7),
+        fecha_siguiente=fecha_consultada + timedelta(days=7),
+        fecha_hoy=timezone.localdate(),
+    )
+    return render(request, "chremata/reportes/periodo.html", contexto)
+
+
+@login_required
+def reporte_mes(request):
+    hoy = timezone.localdate()
+    advertencia = ""
+    try:
+        anio = int(request.GET.get("anio", hoy.year))
+        mes = int(request.GET.get("mes", hoy.month))
+        inicio, fin = construir_periodo_mes(anio, mes)
+    except (TypeError, ValueError):
+        anio = hoy.year
+        mes = hoy.month
+        inicio, fin = construir_periodo_mes(anio, mes)
+        advertencia = (
+            "El mes o año indicado no tiene formato válido. "
+            "Se muestra el mes local actual."
+        )
+
+    mes_anterior = inicio.date() - timedelta(days=1)
+    mes_siguiente = fin.date()
+    contexto = _periodo_contexto(
+        "Reporte mensual Chremata",
+        "mes",
+        inicio,
+        fin,
+        advertencia,
+        anio=anio,
+        mes=mes,
+        mes_anterior_anio=mes_anterior.year,
+        mes_anterior_mes=mes_anterior.month,
+        mes_siguiente_anio=mes_siguiente.year,
+        mes_siguiente_mes=mes_siguiente.month,
+        hoy_anio=hoy.year,
+        hoy_mes=hoy.month,
+    )
+    return render(request, "chremata/reportes/periodo.html", contexto)
+
+
+@login_required
+def reporte_anio(request):
+    hoy = timezone.localdate()
+    advertencia = ""
+    try:
+        anio = int(request.GET.get("anio", hoy.year))
+        inicio, fin = construir_periodo_anio(anio)
+    except (TypeError, ValueError):
+        anio = hoy.year
+        inicio, fin = construir_periodo_anio(anio)
+        advertencia = (
+            "El año indicado no tiene formato válido. "
+            "Se muestra el año local actual."
+        )
+
+    contexto = _periodo_contexto(
+        "Reporte anual Chremata",
+        "anio",
+        inicio,
+        fin,
+        advertencia,
+        anio=anio,
+        anio_anterior=anio - 1,
+        anio_siguiente=anio + 1,
+        hoy_anio=hoy.year,
+    )
+    return render(request, "chremata/reportes/periodo.html", contexto)

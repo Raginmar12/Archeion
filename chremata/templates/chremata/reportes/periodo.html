@@ -1,32 +1,54 @@
 {% extends "chremata/base.html" %}
 
-{% block title %}Reporte diario Chremata{% endblock %}
+{% block title %}{{ titulo }}{% endblock %}
 
 {% block content %}
 <section class="page-heading">
   <div>
-    <h1>Reporte diario Chremata</h1>
-    <p>Fecha local consultada: <strong>{{ fecha_consultada|date:"Y-m-d" }}</strong></p>
+    <h1>{{ titulo }}</h1>
     <p class="muted">
       Periodo: {{ reporte.periodo.inicio }} → {{ reporte.periodo.fin }} ·
       Zona horaria: {{ reporte.periodo.timezone }}
     </p>
   </div>
-  <form class="date-form" method="get">
-    <label for="fecha">Fecha</label>
-    <input id="fecha" type="date" name="fecha" value="{{ fecha_consultada|date:'Y-m-d' }}">
-    <button type="submit">Ver</button>
-  </form>
+  {% if tipo_periodo == "semana" %}
+    <form class="date-form" method="get">
+      <label for="fecha">Fecha dentro de la semana</label>
+      <input id="fecha" type="date" name="fecha" value="{{ fecha_consultada|date:'Y-m-d' }}">
+      <button type="submit">Ver</button>
+    </form>
+  {% elif tipo_periodo == "mes" %}
+    <form class="date-form" method="get">
+      <label for="anio">Año</label><input id="anio" type="number" name="anio" value="{{ anio }}">
+      <label for="mes">Mes</label><input id="mes" type="number" name="mes" min="1" max="12" value="{{ mes }}">
+      <button type="submit">Ver</button>
+    </form>
+  {% elif tipo_periodo == "anio" %}
+    <form class="date-form" method="get">
+      <label for="anio">Año</label><input id="anio" type="number" name="anio" value="{{ anio }}">
+      <button type="submit">Ver</button>
+    </form>
+  {% endif %}
 </section>
 
 {% if advertencia %}
   <div class="notice warning">{{ advertencia }}</div>
 {% endif %}
 
-<nav class="period-nav" aria-label="Navegación de fecha">
-  <a href="?fecha={{ fecha_anterior|date:'Y-m-d' }}">Día anterior</a>
-  <a href="?fecha={{ fecha_hoy|date:'Y-m-d' }}">Hoy</a>
-  <a href="?fecha={{ fecha_siguiente|date:'Y-m-d' }}">Día siguiente</a>
+<nav class="period-nav" aria-label="Navegación de periodo">
+  {% if tipo_periodo == "semana" %}
+    <a href="?fecha={{ fecha_anterior|date:'Y-m-d' }}">Semana anterior</a>
+    <a href="?fecha={{ fecha_hoy|date:'Y-m-d' }}">Semana actual</a>
+    <a href="?fecha={{ fecha_siguiente|date:'Y-m-d' }}">Semana siguiente</a>
+  {% elif tipo_periodo == "mes" %}
+    <a href="?anio={{ mes_anterior_anio }}&mes={{ mes_anterior_mes }}">Mes anterior</a>
+    <a href="?anio={{ hoy_anio }}&mes={{ hoy_mes }}">Mes actual</a>
+    <a href="?anio={{ mes_siguiente_anio }}&mes={{ mes_siguiente_mes }}">Mes siguiente</a>
+  {% elif tipo_periodo == "anio" %}
+    <a href="?anio={{ anio_anterior }}">Año anterior</a>
+    <a href="?anio={{ hoy_anio }}">Año actual</a>
+    <a href="?anio={{ anio_siguiente }}">Año siguiente</a>
+  {% endif %}
 </nav>
 
 <section class="card-grid" aria-label="Totales principales">

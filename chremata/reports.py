@@ -378,9 +378,13 @@ def calcular_reporte_chremata_periodo(inicio, fin, *, tipo_periodo=None):
         PESOS_DECIMALES
     )
     total_neto_estimado = total_neto_despues_comisiones
-    total_neto_ganado = (
-        total_neto_despues_comisiones - total_gastos_material
+    utilidad_bruta_estimada = (total_bruto - total_gastos_material).quantize(
+        PESOS_DECIMALES
+    )
+    neto_operativo_basico = (
+        total_bruto - total_gastos_material - total_comisiones
     ).quantize(PESOS_DECIMALES)
+    total_neto_ganado = neto_operativo_basico
     balance_material_periodo = (total_material_cobrado - total_gastos_material).quantize(
         PESOS_DECIMALES
     )
@@ -408,17 +412,22 @@ def calcular_reporte_chremata_periodo(inicio, fin, *, tipo_periodo=None):
         },
         "totales": {
             "total_bruto": _money(total_bruto),
+            "total_ingresos_cobrados": _money(total_bruto),
             "total_procedimiento": _money(total_procedimiento),
             "total_material_cobrado": _money(total_material_cobrado),
             "total_material_recuperado": _money(total_material_recuperado),
             "total_material_excedente": _money(total_material_excedente),
             "total_comisiones": _money(total_comisiones),
+            "total_comisiones_cobro": _money(total_comisiones),
             "total_neto_despues_comisiones": _money(
                 total_neto_despues_comisiones
             ),
             "total_neto_estimado": _money(total_neto_estimado),
             "total_neto_ganado": _money(total_neto_ganado),
             "total_gastos_material": _money(total_gastos_material),
+            "total_costo_material": _money(total_gastos_material),
+            "utilidad_bruta_estimada": _money(utilidad_bruta_estimada),
+            "neto_operativo_basico": _money(neto_operativo_basico),
             "balance_material_periodo": _money(balance_material_periodo),
         },
         "actividad": {
