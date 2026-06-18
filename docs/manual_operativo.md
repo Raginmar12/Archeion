@@ -112,3 +112,51 @@ Guardar respaldos fuera del repositorio si contienen información real.
 5. Cerrar caja al final con el efectivo contado.
 6. Sincronizar todas las operaciones pendientes.
 7. Comparar el corte local de Zephyros con el corte oficial de Archeion. Si hay diferencia, Archeion es la fuente de verdad.
+
+## Reporte diario Chremata en Archeion
+
+Archeion expone el reporte diario HTML en la red local en:
+
+```text
+/chremata/reportes/dia/
+```
+
+La vista requiere usuario y contraseña de Django. Si el usuario no ha iniciado sesión,
+Django redirige primero a `/accounts/login/` y después permite consultar el reporte.
+
+Por defecto muestra el día local actual. Para consultar una fecha específica, usar el
+parámetro `fecha` en formato `YYYY-MM-DD`:
+
+```text
+/chremata/reportes/dia/?fecha=2026-06-18
+```
+
+Este reporte diario es un periodo calendario local calculado con la zona horaria
+configurada en `ARCHEION_TIME_ZONE`. No es lo mismo que el corte de caja: una
+`CajaSesion` puede cruzar medianoche y aparece solo como complemento informativo del
+reporte diario cuando intersecta el periodo. El dinero del reporte sale de `Ingreso`,
+el desglose por concepto sale de `TicketLinea`, y los gastos de material entran por la
+fecha propia de `GastoMaterial`.
+
+Todavía no hay dashboard principal ni reportes semanal, mensual o anual en HTML; esta
+fase solo expone la vista diaria.
+
+## Dashboard principal de Chremata
+
+La portada operativa de Chremata está en:
+
+```text
+/chremata/
+```
+
+Requiere login de Django y está pensada para consultarse desde teléfono o computadora
+en la red local. Muestra un resumen de hoy, esta semana y este mes, además de caja
+abierta o última caja, material pool actual, últimos cobros y últimos gastos.
+
+El dashboard no reemplaza el Django Admin: el admin sigue siendo el lugar para
+mantenimiento detallado de catálogos y revisión de registros. Tampoco reemplaza el
+corte de caja, porque el corte pertenece a una `CajaSesion` operativa y puede cruzar
+medianoche. El reporte diario detallado sigue disponible en `/chremata/reportes/dia/`.
+
+En esta fase no hay vistas HTML de reporte semanal, mensual, anual ni detalle de caja;
+los indicadores semanales y mensuales del dashboard son solo resumen operativo.

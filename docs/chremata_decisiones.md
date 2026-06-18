@@ -36,3 +36,33 @@ ajuste, recálculo o reverso contable.
 iniciales de Chremata y documenta el precio sugerido en la descripción de cada concepto
 para que Zephyros lo use como guía. El monto oficial se captura en Zephyros en la línea
 del ticket y Archeion lo consolida al recibir la operación correspondiente.
+
+## Reportes por periodo calendario
+
+Los reportes Chremata por día, semana, mes y año son reportes de calendario en la
+zona horaria local configurada por Django. Usan rangos semiabiertos `[inicio, fin)`
+para evitar solapamientos entre periodos consecutivos.
+
+El corte de caja sigue siendo un concepto operativo distinto: pertenece a una
+`CajaSesion`, puede cruzar medianoche y no define los límites de un reporte diario,
+semanal, mensual o anual. En los reportes calendario, las cajas que intersectan el
+periodo se muestran solo como complemento informativo.
+
+Para reportes de periodo, `Ingreso` es la fuente oficial de totales monetarios:
+importe bruto, procedimiento, material cobrado, material recuperado, material
+excedente, comisiones y neto estimado. Las comisiones no se recalculan en el
+reporte; se leen las fotografías congeladas guardadas en cada ingreso.
+
+`TicketPago` se usa para contar tickets cobrados y vincular tickets con líneas e
+ingresos, pero no se suma como fuente independiente de dinero. `Ticket.fecha` se
+usa solo para actividad operativa de creación, pendientes, cancelados o abandonados;
+no se usa para dinero cobrado.
+
+El desglose real por concepto de tickets cobrados sale de `TicketLinea`, filtrada
+por la fecha de `TicketPago`. Esto evita colapsar tickets multilínea en el concepto
+resumen de `TicketPago` o `Ingreso`. Los ingresos directos sin `TicketPago` se
+reportan por separado para no mezclar fuentes de concepto de forma ambigua.
+
+`GastoMaterial` entra al reporte por su propia fecha, tenga o no una caja asociada.
+El balance de material del reporte es un balance simple del periodo
+(`material cobrado - gastos de material`) y no representa el material pool global.
