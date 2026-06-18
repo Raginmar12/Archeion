@@ -1,0 +1,175 @@
+{% extends "chremata/base.html" %}
+
+{% block title %}Reporte diario Chremata{% endblock %}
+
+{% block content %}
+<section class="page-heading">
+  <div>
+    <h1>Reporte diario Chremata</h1>
+    <p>Fecha local consultada: <strong>{{ fecha_consultada|date:"Y-m-d" }}</strong></p>
+    <p class="muted">
+      Periodo: {{ reporte.periodo.inicio }} → {{ reporte.periodo.fin }} ·
+      Zona horaria: {{ reporte.periodo.timezone }}
+    </p>
+  </div>
+  <form class="date-form" method="get">
+    <label for="fecha">Fecha</label>
+    <input id="fecha" type="date" name="fecha" value="{{ fecha_consultada|date:'Y-m-d' }}">
+    <button type="submit">Ver</button>
+  </form>
+</section>
+
+{% if advertencia %}
+  <div class="notice warning">{{ advertencia }}</div>
+{% endif %}
+
+<nav class="period-nav" aria-label="Navegación de fecha">
+  <a href="?fecha={{ fecha_anterior|date:'Y-m-d' }}">Día anterior</a>
+  <a href="?fecha={{ fecha_hoy|date:'Y-m-d' }}">Hoy</a>
+  <a href="?fecha={{ fecha_siguiente|date:'Y-m-d' }}">Día siguiente</a>
+</nav>
+
+<section class="card-grid" aria-label="Totales principales">
+  <article class="card">
+    <span>Total bruto</span>
+    <strong>${{ reporte.totales.total_bruto }}</strong>
+  </article>
+  <article class="card">
+    <span>Total neto estimado</span>
+    <strong>${{ reporte.totales.total_neto_estimado }}</strong>
+  </article>
+  <article class="card">
+    <span>Total comisiones</span>
+    <strong>${{ reporte.totales.total_comisiones }}</strong>
+  </article>
+  <article class="card">
+    <span>Material cobrado</span>
+    <strong>${{ reporte.totales.total_material_cobrado }}</strong>
+  </article>
+  <article class="card">
+    <span>Gastos de material</span>
+    <strong>${{ reporte.totales.total_gastos_material }}</strong>
+  </article>
+  <article class="card">
+    <span>Balance material del periodo</span>
+    <strong>${{ reporte.totales.balance_material_periodo }}</strong>
+  </article>
+  <article class="card">
+    <span>Tickets cobrados</span>
+    <strong>{{ reporte.actividad.tickets_cobrados }}</strong>
+  </article>
+  <article class="card">
+    <span>Promedio por ticket</span>
+    <strong>${{ reporte.actividad.promedio_por_ticket }}</strong>
+  </article>
+</section>
+
+<section class="report-section">
+  <h2>Por método de pago</h2>
+  {% if reporte.por_metodo %}
+    <div class="table-wrapper">
+      <table>
+        <thead><tr><th>Método</th><th>Cantidad</th><th>Bruto</th><th>Comisiones</th><th>Neto estimado</th></tr></thead>
+        <tbody>
+          {% for item in reporte.por_metodo %}
+            <tr><td>{{ item.metodo_pago }}</td><td>{{ item.cantidad }}</td><td>${{ item.total_bruto }}</td><td>${{ item.total_comisiones }}</td><td>${{ item.total_neto_estimado }}</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% else %}
+    <p class="empty">Sin datos para este periodo.</p>
+  {% endif %}
+</section>
+
+<section class="report-section">
+  <h2>Por canal de cobro</h2>
+  {% if reporte.por_canal %}
+    <div class="table-wrapper">
+      <table>
+        <thead><tr><th>Canal</th><th>Método</th><th>Cantidad</th><th>Bruto</th><th>Comisiones</th><th>Neto estimado</th></tr></thead>
+        <tbody>
+          {% for item in reporte.por_canal %}
+            <tr><td>{{ item.canal_cobro }}</td><td>{{ item.metodo_pago }}</td><td>{{ item.cantidad }}</td><td>${{ item.total_bruto }}</td><td>${{ item.total_comisiones }}</td><td>${{ item.total_neto_estimado }}</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% else %}
+    <p class="empty">Sin datos para este periodo.</p>
+  {% endif %}
+</section>
+
+<section class="report-section">
+  <h2>Por concepto</h2>
+  {% if reporte.por_concepto %}
+    <div class="table-wrapper">
+      <table>
+        <thead><tr><th>Concepto</th><th>Cantidad total</th><th>Líneas</th><th>Total</th><th>Material cobrado</th></tr></thead>
+        <tbody>
+          {% for item in reporte.por_concepto %}
+            <tr><td>{{ item.concepto }}</td><td>{{ item.cantidad_total }}</td><td>{{ item.lineas }}</td><td>${{ item.total }}</td><td>${{ item.material_cobrado }}</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% else %}
+    <p class="empty">Sin datos para este periodo.</p>
+  {% endif %}
+</section>
+
+<section class="report-section">
+  <h2>Por origen</h2>
+  {% if reporte.por_origen %}
+    <div class="table-wrapper">
+      <table>
+        <thead><tr><th>Origen</th><th>Cantidad</th><th>Bruto</th><th>Neto estimado</th></tr></thead>
+        <tbody>
+          {% for item in reporte.por_origen %}
+            <tr><td>{{ item.origen }}</td><td>{{ item.cantidad }}</td><td>${{ item.total_bruto }}</td><td>${{ item.total_neto_estimado }}</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% else %}
+    <p class="empty">Sin datos para este periodo.</p>
+  {% endif %}
+</section>
+
+<section class="report-section">
+  <h2>Gastos de material</h2>
+  <p>Total: <strong>${{ reporte.gastos_material.total }}</strong> · Con caja: ${{ reporte.gastos_material.con_caja.total }} · Sin caja: ${{ reporte.gastos_material.sin_caja.total }}</p>
+  {% if reporte.gastos_material.detalle %}
+    <div class="table-wrapper">
+      <table>
+        <thead><tr><th>Fecha</th><th>Monto</th><th>Descripción</th><th>Caja</th></tr></thead>
+        <tbody>
+          {% for gasto in reporte.gastos_material.detalle %}
+            <tr><td>{{ gasto.fecha }}</td><td>${{ gasto.monto }}</td><td>{{ gasto.descripcion|default:"—" }}</td><td>{{ gasto.caja_public_id|default:"—" }}</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% else %}
+    <p class="empty">Sin datos para este periodo.</p>
+  {% endif %}
+</section>
+
+<section class="report-section">
+  <h2>Cajas que intersectan el periodo</h2>
+  {% if reporte.cajas.intersectan_periodo %}
+    <div class="table-wrapper">
+      <table>
+        <thead><tr><th>Caja</th><th>Estado</th><th>Apertura</th><th>Cierre</th><th>Efectivo esperado</th><th>Diferencia</th></tr></thead>
+        <tbody>
+          {% for caja in reporte.cajas.intersectan_periodo %}
+            <tr><td>{{ caja.caja_fisica.nombre|default:caja.caja_public_id }}</td><td>{{ caja.estado }}</td><td>{{ caja.abierta_en }}</td><td>{{ caja.cerrada_en|default:"—" }}</td><td>${{ caja.efectivo_esperado }}</td><td>${{ caja.diferencia_efectivo }}</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% else %}
+    <p class="empty">Sin datos para este periodo.</p>
+  {% endif %}
+</section>
+{% endblock %}
