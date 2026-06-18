@@ -312,3 +312,32 @@ th { color: var(--muted); }
   color: var(--muted);
   font-size: 0.94rem;
 }
+
+.primary-result {
+  background: #fff8eb;
+  border-color: var(--accent);
+  box-shadow: inset 0 0 0 1px rgba(133, 95, 47, 0.18);
+}
+
+.primary-result dt,
+.primary-result span {
+  color: var(--accent);
+  font-weight: 700;
+}
+
+.primary-result dd,
+.primary-result strong {
+  color: var(--text);
+  font-size: 1.65rem;
+}
+
+.auxiliary-metric {
+  background: #faf8f1;
+  color: var(--muted);
+  font-size: 0.94rem;
+}
+
+.auxiliary-metric dd,
+.auxiliary-metric strong {
+  color: var(--muted);
+}

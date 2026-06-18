@@ -23,13 +23,11 @@
     <h2>Hoy</h2>
     <dl class="metric-list">
       <div><dt>Ingresos cobrados</dt><dd>${{ reporte_hoy.totales.total_ingresos_cobrados }}</dd></div>
-      <div><dt>Neto operativo básico</dt><dd>${{ reporte_hoy.totales.neto_operativo_basico }}</dd></div>
+      <div><dt>Comisiones de cobro</dt><dd>${{ reporte_hoy.totales.total_comisiones_cobro }}</dd></div>
       <div><dt>Después de comisiones</dt><dd>${{ reporte_hoy.totales.total_neto_despues_comisiones }}</dd></div>
-      <div><dt>Tickets cobrados</dt><dd>{{ reporte_hoy.actividad.tickets_cobrados }}</dd></div>
       <div><dt>Costo de material</dt><dd>${{ reporte_hoy.totales.total_costo_material }}</dd></div>
-      <div class="secondary-metric"><dt>Utilidad bruta estimada</dt><dd>${{ reporte_hoy.totales.utilidad_bruta_estimada }}</dd></div>
-      <div class="secondary-metric"><dt>Comisiones de cobro</dt><dd>${{ reporte_hoy.totales.total_comisiones_cobro }}</dd></div>
-      <div class="secondary-metric"><dt>Balance material</dt><dd>${{ reporte_hoy.totales.balance_material_periodo }}</dd></div>
+      <div class="primary-result"><dt>Neto operativo básico</dt><dd>${{ reporte_hoy.totales.neto_operativo_basico }}</dd></div>
+      <div class="auxiliary-metric"><dt>Balance material del periodo</dt><dd>${{ reporte_hoy.totales.balance_material_periodo }}</dd></div>
     </dl>
     <a href="{% url 'chremata_reporte_diario' %}?fecha={{ fecha_hoy|date:'Y-m-d' }}">Ver reporte diario</a>
   </article>
@@ -38,13 +36,11 @@
     <h2>Esta semana</h2>
     <dl class="metric-list">
       <div><dt>Ingresos cobrados</dt><dd>${{ reporte_semana.totales.total_ingresos_cobrados }}</dd></div>
-      <div><dt>Neto operativo básico</dt><dd>${{ reporte_semana.totales.neto_operativo_basico }}</dd></div>
+      <div><dt>Comisiones de cobro</dt><dd>${{ reporte_semana.totales.total_comisiones_cobro }}</dd></div>
       <div><dt>Después de comisiones</dt><dd>${{ reporte_semana.totales.total_neto_despues_comisiones }}</dd></div>
-      <div><dt>Tickets cobrados</dt><dd>{{ reporte_semana.actividad.tickets_cobrados }}</dd></div>
       <div><dt>Costo de material</dt><dd>${{ reporte_semana.totales.total_costo_material }}</dd></div>
-      <div class="secondary-metric"><dt>Utilidad bruta estimada</dt><dd>${{ reporte_semana.totales.utilidad_bruta_estimada }}</dd></div>
-      <div class="secondary-metric"><dt>Comisiones de cobro</dt><dd>${{ reporte_semana.totales.total_comisiones_cobro }}</dd></div>
-      <div class="secondary-metric"><dt>Balance material</dt><dd>${{ reporte_semana.totales.balance_material_periodo }}</dd></div>
+      <div class="primary-result"><dt>Neto operativo básico</dt><dd>${{ reporte_semana.totales.neto_operativo_basico }}</dd></div>
+      <div class="auxiliary-metric"><dt>Balance material del periodo</dt><dd>${{ reporte_semana.totales.balance_material_periodo }}</dd></div>
     </dl>
   </article>
 
@@ -52,13 +48,11 @@
     <h2>Este mes</h2>
     <dl class="metric-list">
       <div><dt>Ingresos cobrados</dt><dd>${{ reporte_mes.totales.total_ingresos_cobrados }}</dd></div>
-      <div><dt>Neto operativo básico</dt><dd>${{ reporte_mes.totales.neto_operativo_basico }}</dd></div>
+      <div><dt>Comisiones de cobro</dt><dd>${{ reporte_mes.totales.total_comisiones_cobro }}</dd></div>
       <div><dt>Después de comisiones</dt><dd>${{ reporte_mes.totales.total_neto_despues_comisiones }}</dd></div>
-      <div><dt>Tickets cobrados</dt><dd>{{ reporte_mes.actividad.tickets_cobrados }}</dd></div>
       <div><dt>Costo de material</dt><dd>${{ reporte_mes.totales.total_costo_material }}</dd></div>
-      <div class="secondary-metric"><dt>Utilidad bruta estimada</dt><dd>${{ reporte_mes.totales.utilidad_bruta_estimada }}</dd></div>
-      <div class="secondary-metric"><dt>Comisiones de cobro</dt><dd>${{ reporte_mes.totales.total_comisiones_cobro }}</dd></div>
-      <div class="secondary-metric"><dt>Balance material</dt><dd>${{ reporte_mes.totales.balance_material_periodo }}</dd></div>
+      <div class="primary-result"><dt>Neto operativo básico</dt><dd>${{ reporte_mes.totales.neto_operativo_basico }}</dd></div>
+      <div class="auxiliary-metric"><dt>Balance material del periodo</dt><dd>${{ reporte_mes.totales.balance_material_periodo }}</dd></div>
     </dl>
   </article>
 

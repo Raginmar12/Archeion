@@ -570,6 +570,29 @@ class ReporteDiarioViewTests(TestCase):
         self.assertContains(response, "Sin cajas registradas")
         self.assertContains(response, "Reporte diario")
 
+    def test_dashboard_muestra_metricas_operativas_visibles(self):
+        self.login()
+
+        with patch(
+            "chremata.views.calcular_reporte_chremata_periodo",
+            return_value=self.reporte_fake(),
+        ):
+            response = self.client.get(reverse("chremata_dashboard"))
+
+        self.assertEqual(response.status_code, 200)
+        for etiqueta in (
+            "Ingresos cobrados",
+            "Comisiones de cobro",
+            "Después de comisiones",
+            "Costo de material",
+            "Neto operativo básico",
+            "Balance material",
+        ):
+            self.assertContains(response, etiqueta)
+        self.assertNotContains(response, "Utilidad bruta estimada")
+        self.assertNotContains(response, "Neto " + "ganado")
+        self.assertNotContains(response, "Total neto " + "estimado")
+
     def test_dashboard_usa_reportes_para_hoy_semana_y_mes(self):
         self.login()
 
@@ -775,8 +798,16 @@ class ReporteDiarioViewTests(TestCase):
         )
 
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Neto operativo básico")
-        self.assertContains(response, "Después de comisiones")
+        for etiqueta in (
+            "Ingresos cobrados",
+            "Comisiones de cobro",
+            "Después de comisiones",
+            "Costo de material",
+            "Neto operativo básico",
+            "Balance material",
+        ):
+            self.assertContains(response, etiqueta)
+        self.assertNotContains(response, "Utilidad bruta estimada")
         self.assertNotContains(response, "Neto " + "ganado")
         self.assertNotContains(response, "Total neto " + "estimado")
 
@@ -812,7 +843,18 @@ class ReporteDiarioViewTests(TestCase):
                 self.assertEqual(response.status_code, 200)
                 self.assertTemplateUsed(response, "chremata/reportes/periodo.html")
                 self.assertContains(response, titulo)
-                self.assertContains(response, "Neto operativo básico")
+                for etiqueta in (
+                    "Ingresos cobrados",
+                    "Comisiones de cobro",
+                    "Después de comisiones",
+                    "Costo de material",
+                    "Neto operativo básico",
+                    "Balance material",
+                ):
+                    self.assertContains(response, etiqueta)
+                self.assertNotContains(response, "Utilidad bruta estimada")
+                self.assertNotContains(response, "Neto " + "ganado")
+                self.assertNotContains(response, "Total neto " + "estimado")
                 self.assertContains(response, "Sin datos para este periodo.")
                 self.assertEqual(calcular_reporte.call_args.kwargs["tipo_periodo"], tipo)
 

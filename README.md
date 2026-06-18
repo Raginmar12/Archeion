@@ -137,11 +137,11 @@ del endpoint API usado por Zephyros.
 Nomenclatura contable visible:
 
 - **Ingresos cobrados** = total cobrado del periodo.
-- **Costo de material** = gastos de material del periodo.
-- **Utilidad bruta estimada** = ingresos cobrados - costo de material.
-- **Comisiones de cobro** = comisiones de canal/procesador.
-- **Neto operativo básico** = ingresos cobrados - costo de material - comisiones de cobro.
-- **Balance material del periodo** = material cobrado - costo de material.
+- − **Comisiones de cobro** = comisiones de canal/procesador.
+- = **Después de comisiones** = ingresos cobrados - comisiones de cobro.
+- − **Costo de material** = gastos de material del periodo.
+- = **Neto operativo básico** = ingresos cobrados - costo de material - comisiones de cobro.
+- **Balance material del periodo** = métrica auxiliar: material cobrado - costo de material.
 
 El neto operativo básico no es ganancia final real: todavía no descuenta renta,
 gasolina, equipo, mantenimiento, impuestos ni otros gastos no registrados.

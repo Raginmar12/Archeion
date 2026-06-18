@@ -170,14 +170,15 @@ El corte HTML es una vista humana; el endpoint API de corte sigue existiendo par
 
 ### Lectura de métricas monetarias
 
-En los reportes y el dashboard de Chremata:
+En los reportes y el dashboard de Chremata, la presentación operativa se lee como un mini estado de resultados básico:
 
 - **Ingresos cobrados** = total cobrado del periodo.
-- **Costo de material** = gastos de material registrados por fecha del periodo.
-- **Utilidad bruta estimada** = ingresos cobrados - costo de material.
-- **Comisiones de cobro** = comisiones de canal o procesador guardadas en los ingresos.
-- **Neto operativo básico** = ingresos cobrados - costo de material - comisiones de cobro.
-- **Balance material del periodo** = material cobrado - costo de material.
+- − **Comisiones de cobro** = comisiones de canal o procesador guardadas en los ingresos.
+- = **Después de comisiones** = ingresos cobrados - comisiones de cobro.
+- − **Costo de material** = gastos de material registrados por fecha del periodo.
+- = **Neto operativo básico** = ingresos cobrados - costo de material - comisiones de cobro.
+
+**Balance material del periodo** es una métrica auxiliar: material cobrado - costo de material.
 
 El balance material no es una utilidad: solo compara lo cobrado para recuperar
 material contra lo gastado en material dentro del mismo periodo. El neto operativo
