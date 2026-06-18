@@ -160,3 +160,16 @@ medianoche. El reporte diario detallado sigue disponible en `/chremata/reportes/
 
 En esta fase no hay vistas HTML de reporte semanal, mensual, anual ni detalle de caja;
 los indicadores semanales y mensuales del dashboard son solo resumen operativo.
+
+### Lectura de métricas monetarias
+
+En los reportes y el dashboard de Chremata:
+
+- **Neto después de comisiones** = bruto - comisiones de cobro.
+- **Neto ganado** = bruto - comisiones de cobro - gastos de material del periodo.
+- **Balance material del periodo** = material cobrado - gastos de material.
+
+El balance material no es la ganancia neta: solo compara lo cobrado para recuperar
+material contra lo gastado en material dentro del mismo periodo. El neto ganado
+todavía no descuenta otros costos como renta, gasolina, equipo, mantenimiento,
+impuestos u otros gastos que no estén registrados como gasto de material.

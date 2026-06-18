@@ -50,8 +50,18 @@ periodo se muestran solo como complemento informativo.
 
 Para reportes de periodo, `Ingreso` es la fuente oficial de totales monetarios:
 importe bruto, procedimiento, material cobrado, material recuperado, material
-excedente, comisiones y neto estimado. Las comisiones no se recalculan en el
-reporte; se leen las fotografías congeladas guardadas en cada ingreso.
+excedente y comisiones. Las comisiones no se recalculan en el reporte; se leen
+las fotografías congeladas guardadas en cada ingreso.
+
+En reportes Chremata, los totales se nombran así:
+
+- Neto después de comisiones = bruto - comisiones.
+- Neto ganado = bruto - comisiones - gastos de material.
+- Balance material del periodo = material cobrado - gastos de material.
+
+El neto ganado todavía no descuenta otros costos operativos o personales como
+renta, gasolina, equipo, mantenimiento, impuestos u otros gastos no registrados
+como gasto de material del periodo.
 
 `TicketPago` se usa para contar tickets cobrados y vincular tickets con líneas e
 ingresos, pero no se suma como fuente independiente de dinero. `Ticket.fecha` se
