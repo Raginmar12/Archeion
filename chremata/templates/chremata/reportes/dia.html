@@ -6,12 +6,15 @@
 <section class="page-heading">
   <div>
     <h1>Reporte diario Chremata</h1>
-    <p>Fecha local consultada: <strong>{{ fecha_consultada|date:"Y-m-d" }}</strong></p>
+    <p><strong>Reporte calendario diario</strong> · Fecha local consultada: <strong>{{ fecha_consultada|date:"Y-m-d" }}</strong></p>
     <p class="muted">
       Periodo: {{ reporte.periodo.inicio }} → {{ reporte.periodo.fin }} ·
       Zona horaria: {{ reporte.periodo.timezone }}
     </p>
   </div>
+  <nav class="quick-links" aria-label="Acciones de reporte">
+    <a class="button-link secondary" href="{% url 'chremata_dashboard' %}">Volver al dashboard</a>
+  </nav>
   <form class="date-form" method="get">
     <label for="fecha">Fecha</label>
     <input id="fecha" type="date" name="fecha" value="{{ fecha_consultada|date:'Y-m-d' }}">
@@ -78,7 +81,7 @@
       </table>
     </div>
   {% else %}
-    <p class="empty">Sin datos para este periodo.</p>
+    <p class="empty">Sin cobros en este periodo.</p>
   {% endif %}
 </section>
 
@@ -96,7 +99,7 @@
       </table>
     </div>
   {% else %}
-    <p class="empty">Sin datos para este periodo.</p>
+    <p class="empty">Sin cobros en este periodo.</p>
   {% endif %}
 </section>
 
@@ -114,7 +117,7 @@
       </table>
     </div>
   {% else %}
-    <p class="empty">Sin datos para este periodo.</p>
+    <p class="empty">Sin datos por concepto.</p>
   {% endif %}
 </section>
 
@@ -132,7 +135,7 @@
       </table>
     </div>
   {% else %}
-    <p class="empty">Sin datos para este periodo.</p>
+    <p class="empty">Sin datos por origen en este periodo.</p>
   {% endif %}
 </section>
 
@@ -151,7 +154,7 @@
       </table>
     </div>
   {% else %}
-    <p class="empty">Sin datos para este periodo.</p>
+    <p class="empty">Sin gastos de material en este periodo.</p>
   {% endif %}
 </section>
 
@@ -169,7 +172,7 @@
       </table>
     </div>
   {% else %}
-    <p class="empty">Sin datos para este periodo.</p>
+    <p class="empty">Sin cajas relacionadas.</p>
   {% endif %}
 </section>
 {% endblock %}

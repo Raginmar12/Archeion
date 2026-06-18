@@ -1,4 +1,5 @@
 from datetime import date, timedelta
+from decimal import Decimal, InvalidOperation
 
 from django.contrib.auth.decorators import login_required
 from django.shortcuts import get_object_or_404, render
@@ -227,9 +228,24 @@ def caja_detalle(request, public_id):
         public_id=public_id,
     )
     corte = calcular_corte_caja(caja)
+    diferencia = corte["efectivo"].get("diferencia_efectivo")
+    diferencia_clase = "difference-ok"
+    if diferencia is None:
+        diferencia_clase = ""
+    else:
+        try:
+            diferencia_decimal = Decimal(diferencia)
+            if diferencia_decimal > 0:
+                diferencia_clase = "difference-surplus"
+            elif diferencia_decimal < 0:
+                diferencia_clase = "difference-missing"
+        except (InvalidOperation, TypeError):
+            diferencia_clase = ""
+
     contexto = {
         "titulo": "Corte de caja",
         "caja": caja,
         "corte": corte,
+        "diferencia_clase": diferencia_clase,
     }
     return render(request, "chremata/cajas/detalle.html", contexto)

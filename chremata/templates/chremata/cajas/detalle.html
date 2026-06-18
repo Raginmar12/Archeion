@@ -6,7 +6,8 @@
 <section class="page-heading">
   <div>
     <h1>Corte de caja</h1>
-    <p>Caja: <strong>{{ corte.caja.caja_public_id }}</strong></p>
+    <p><strong>Corte operativo</strong> · Caja: <strong>{{ corte.caja.caja_public_id }}</strong></p>
+    <p class="muted">El corte de caja es operativo y puede cruzar medianoche; no reemplaza el reporte calendario.</p>
     <p class="muted">
       Caja física: {{ corte.caja.caja_fisica.nombre|default:"Sin caja física" }} ·
       Estado: <span class="status-pill">{{ corte.caja.estado }}</span>
@@ -18,9 +19,9 @@
     </p>
   </div>
   <nav class="quick-links" aria-label="Navegación de corte">
-    <a class="button-link" href="{% url 'chremata_dashboard' %}">Dashboard</a>
-    <a class="button-link" href="{% url 'chremata_reporte_diario' %}">Reporte diario</a>
-    <button type="button" onclick="history.back()">Volver</button>
+    <a class="button-link" href="{% url 'chremata_dashboard' %}">Volver al dashboard</a>
+    <a class="button-link" href="{% url 'chremata_reporte_diario' %}">Ver reporte diario</a>
+    <button class="button-link secondary" type="button" onclick="history.back()">Volver</button>
   </nav>
 </section>
 
@@ -37,7 +38,7 @@
     <span>Efectivo contado</span>
     <strong>{% if corte.efectivo.efectivo_contado_cierre %}${{ corte.efectivo.efectivo_contado_cierre }}{% else %}—{% endif %}</strong>
   </article>
-  <article class="card">
+  <article class="card {{ diferencia_clase }}">
     <span>Diferencia</span>
     <strong>{% if corte.efectivo.diferencia_efectivo %}${{ corte.efectivo.diferencia_efectivo }}{% else %}—{% endif %}</strong>
   </article>
@@ -53,7 +54,7 @@
     {% if caja.notas_apertura %}<p><strong>Apertura:</strong> {{ caja.notas_apertura }}</p>{% endif %}
     {% if caja.notas_cierre %}<p><strong>Cierre:</strong> {{ caja.notas_cierre }}</p>{% endif %}
   {% else %}
-    <p class="empty">Sin datos para esta sección.</p>
+    <p class="empty">Sin notas registradas.</p>
   {% endif %}
 </section>
 
@@ -82,7 +83,7 @@
       </table>
     </div>
   {% else %}
-    <p class="empty">Sin datos para esta sección.</p>
+    <p class="empty">Sin cobros en este corte.</p>
   {% endif %}
 </section>
 
@@ -100,7 +101,7 @@
       </table>
     </div>
   {% else %}
-    <p class="empty">Sin datos para esta sección.</p>
+    <p class="empty">Sin cobros en este corte.</p>
   {% endif %}
 </section>
 
@@ -118,7 +119,7 @@
       </table>
     </div>
   {% else %}
-    <p class="empty">Sin datos para esta sección.</p>
+    <p class="empty">Sin datos por concepto.</p>
   {% endif %}
 </section>
 
@@ -136,7 +137,7 @@
       </table>
     </div>
   {% else %}
-    <p class="empty">Sin datos para esta sección.</p>
+    <p class="empty">Sin gastos de material en este corte.</p>
   {% endif %}
 </section>
 
@@ -155,7 +156,7 @@
       </table>
     </div>
   {% else %}
-    <p class="empty">Sin datos para esta sección.</p>
+    <p class="empty">Sin tickets relacionados.</p>
   {% endif %}
 </section>
 {% endblock %}

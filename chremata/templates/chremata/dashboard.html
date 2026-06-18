@@ -6,14 +6,17 @@
 <section class="page-heading">
   <div>
     <h1>Chremata</h1>
-    <p>Resumen operativo local del {{ fecha_hoy|date:"Y-m-d" }}</p>
+    <p>Resumen para revisión en casa del {{ fecha_hoy|date:"Y-m-d" }}</p>
     <p class="muted">Zona horaria: {{ timezone_actual }}</p>
   </div>
   <nav class="quick-links" aria-label="Accesos principales">
-    <a class="button-link" href="{% url 'chremata_reporte_diario' %}">Reporte diario</a>
-    <a class="button-link" href="{% url 'chremata_reporte_semana' %}">Reporte semanal</a>
-    <a class="button-link" href="{% url 'chremata_reporte_mes' %}">Reporte mensual</a>
-    <a class="button-link" href="{% url 'chremata_reporte_anio' %}">Reporte anual</a>
+    <a class="button-link" href="{% url 'chremata_reporte_diario' %}?fecha={{ fecha_hoy|date:'Y-m-d' }}">Ver reporte de hoy</a>
+    <a class="button-link" href="{% url 'chremata_reporte_semana' %}?fecha={{ fecha_hoy|date:'Y-m-d' }}">Ver esta semana</a>
+    <a class="button-link" href="{% url 'chremata_reporte_mes' %}?anio={{ fecha_hoy|date:'Y' }}&mes={{ fecha_hoy|date:'n' }}">Ver este mes</a>
+    <a class="button-link" href="{% url 'chremata_reporte_anio' %}?anio={{ fecha_hoy|date:'Y' }}">Ver este año</a>
+    {% if caja_resumen %}
+      <a class="button-link secondary" href="{% url 'chremata_caja_detalle' caja_resumen.public_id %}">{% if caja_abierta %}Ver caja abierta{% else %}Ver última caja{% endif %}</a>
+    {% endif %}
     <a class="button-link secondary" href="{% url 'admin:index' %}">Admin</a>
   </nav>
 </section>
@@ -106,7 +109,7 @@
         {% endfor %}
       </ul>
     {% else %}
-      <p class="empty">Sin cobros recientes.</p>
+      <p class="empty">Sin actividad reciente de cobros.</p>
     {% endif %}
   </article>
 
@@ -124,7 +127,7 @@
         {% endfor %}
       </ul>
     {% else %}
-      <p class="empty">Sin gastos recientes.</p>
+      <p class="empty">Sin actividad reciente de gastos.</p>
     {% endif %}
   </article>
 </section>

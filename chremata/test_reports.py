@@ -1,5 +1,6 @@
 from datetime import date, datetime
 from decimal import Decimal
+from pathlib import Path
 from zoneinfo import ZoneInfo
 
 from django.test import TestCase, override_settings
@@ -568,7 +569,13 @@ class ReporteDiarioViewTests(TestCase):
         self.assertTemplateUsed(response, "chremata/dashboard.html")
         self.assertContains(response, "Chremata")
         self.assertContains(response, "Sin cajas registradas")
-        self.assertContains(response, "Reporte diario")
+        for texto in ("Ver reporte de hoy", "Ver esta semana", "Ver este mes", "Ver este año"):
+            self.assertContains(response, texto)
+        self.assertContains(response, reverse("chremata_reporte_diario"))
+        self.assertContains(response, reverse("chremata_reporte_semana"))
+        self.assertContains(response, reverse("chremata_reporte_mes"))
+        self.assertContains(response, reverse("chremata_reporte_anio"))
+        self.assertContains(response, "chremata/chremata.css")
 
     def test_dashboard_muestra_metricas_operativas_visibles(self):
         self.login()
@@ -671,7 +678,33 @@ class ReporteDiarioViewTests(TestCase):
         self.assertContains(response, "$123.00")
         self.assertContains(response, "Cobro reciente")
         self.assertContains(response, "Gasas")
+        self.assertContains(response, "Ver caja abierta")
         self.assertContains(response, f"/chremata/cajas/{caja.public_id}/")
+        self.assertNotContains(response, 'href="/api/v1/chremata/' + 'cajas/')
+
+    def test_dashboard_muestra_link_a_ultima_caja_si_no_hay_abierta(self):
+        caja = CajaSesion.objects.create(
+            device_id="zephyros",
+            abierta_en=datetime(2026, 6, 18, 8, 0, tzinfo=timezone.get_current_timezone()),
+            cerrada_en=datetime(2026, 6, 18, 12, 0, tzinfo=timezone.get_current_timezone()),
+            estado=CajaSesion.ESTADO_CERRADA,
+            saldo_inicial_efectivo=Decimal("100.00"),
+        )
+        self.login()
+
+        response = self.client.get(reverse("chremata_dashboard"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Ver última caja")
+        self.assertContains(response, f"/chremata/cajas/{caja.public_id}/")
+        self.assertNotContains(response, 'href="/api/v1/chremata/' + 'cajas/')
+
+    def test_css_declara_variables_de_identidad_chremata(self):
+        css = Path("chremata/static/chremata/chremata.css").read_text()
+
+        self.assertIn("--chremata-bg", css)
+        self.assertIn("--chremata-copper", css)
+        self.assertIn("--chremata-text", css)
 
     def test_url_name_resuelve_reporte_diario(self):
         match = resolve("/chremata/reportes/dia/")
@@ -700,7 +733,9 @@ class ReporteDiarioViewTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertTemplateUsed(response, "chremata/reportes/dia.html")
         self.assertContains(response, "Reporte diario Chremata")
-        self.assertContains(response, "Sin datos para este periodo.")
+        self.assertContains(response, "Volver al dashboard")
+        self.assertContains(response, "Sin cobros en este periodo.")
+        self.assertContains(response, "chremata/chremata.css")
 
     def test_query_param_fecha_usa_esa_fecha_y_servicio_de_reportes(self):
         self.login()
@@ -732,6 +767,16 @@ class ReporteDiarioViewTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "La fecha indicada no tiene formato válido")
+
+    def test_reporte_diario_muestra_navegacion_periodo_con_query_params(self):
+        self.login()
+
+        response = self.client.get(reverse("chremata_reporte_diario"), {"fecha": "2026-06-18"})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'href="?fecha=2026-06-17"')
+        self.assertContains(response, 'href="?fecha=2026-06-18"')
+        self.assertContains(response, 'href="?fecha=2026-06-19"')
 
     def test_vista_muestra_link_a_detalle_html_de_caja(self):
         CajaSesion.objects.create(
@@ -855,8 +900,41 @@ class ReporteDiarioViewTests(TestCase):
                 self.assertNotContains(response, "Utilidad bruta estimada")
                 self.assertNotContains(response, "Neto " + "ganado")
                 self.assertNotContains(response, "Total neto " + "estimado")
-                self.assertContains(response, "Sin datos para este periodo.")
+                self.assertContains(response, "Sin cobros en este periodo.")
+                self.assertContains(response, "Volver al dashboard")
+                self.assertContains(response, "chremata/chremata.css")
                 self.assertEqual(calcular_reporte.call_args.kwargs["tipo_periodo"], tipo)
+
+    def test_reportes_periodo_muestran_navegacion_con_query_params_correctos(self):
+        self.login()
+        casos = (
+            (
+                "chremata_reporte_semana",
+                {"fecha": "2026-06-18"},
+                ('href="?fecha=2026-06-11"', 'href="?fecha=2026-06-18"', 'href="?fecha=2026-06-25"'),
+                ("Semana anterior", "Esta semana", "Semana siguiente"),
+            ),
+            (
+                "chremata_reporte_mes",
+                {"anio": "2026", "mes": "6"},
+                ('href="?anio=2026&mes=5"', 'href="?anio=2026&mes=6"', 'href="?anio=2026&mes=7"'),
+                ("Mes anterior", "Este mes", "Mes siguiente"),
+            ),
+            (
+                "chremata_reporte_anio",
+                {"anio": "2026"},
+                ('href="?anio=2025"', 'href="?anio=2026"', 'href="?anio=2027"'),
+                ("Año anterior", "Este año", "Año siguiente"),
+            ),
+        )
+        for name, params, hrefs, labels in casos:
+            with self.subTest(name=name):
+                response = self.client.get(reverse(name), params)
+                self.assertEqual(response.status_code, 200)
+                for href in hrefs:
+                    self.assertContains(response, href)
+                for label in labels:
+                    self.assertContains(response, label)
 
     def test_reportes_periodo_parametros_invalidos_no_rompen(self):
         self.login()
@@ -954,6 +1032,10 @@ class ReporteDiarioViewTests(TestCase):
         self.assertContains(response, "Consulta")
         self.assertContains(response, "Efectivo en caja")
         self.assertContains(response, "Tickets cobrados")
+        self.assertContains(response, "Volver al dashboard")
+        self.assertContains(response, "Ver reporte diario")
+        self.assertContains(response, "Volver")
+        self.assertContains(response, "difference-ok")
         self.assertNotContains(response, 'href="/api/v1/chremata/' + 'cajas/')
 
     def test_caja_detalle_inexistente_devuelve_404(self):
@@ -975,5 +1057,5 @@ class ReporteDiarioViewTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Caja abierta / cierre pendiente")
-        self.assertContains(response, "Sin datos para esta sección.")
+        self.assertContains(response, "Sin notas registradas.")
         self.assertNotContains(response, 'href="/api/v1/chremata/' + 'cajas/')
