@@ -46,7 +46,9 @@ para evitar solapamientos entre periodos consecutivos.
 El corte de caja sigue siendo un concepto operativo distinto: pertenece a una
 `CajaSesion`, puede cruzar medianoche y no define los límites de un reporte diario,
 semanal, mensual o anual. En los reportes calendario, las cajas que intersectan el
-periodo se muestran solo como complemento informativo.
+periodo se muestran solo como complemento informativo y enlazan a la vista HTML
+`/chremata/cajas/<public_id>/`. Esa vista requiere login, usa `calcular_corte_caja()`
+y no reemplaza el endpoint API de corte usado por Zephyros.
 
 Para reportes de periodo, `Ingreso` es la fuente oficial de totales monetarios:
 importe bruto, procedimiento, material cobrado, material recuperado, material
@@ -55,13 +57,13 @@ las fotografías congeladas guardadas en cada ingreso.
 
 En reportes Chremata, los totales se nombran así:
 
-- Neto después de comisiones = bruto - comisiones.
-- Neto ganado = bruto - comisiones - gastos de material.
+- Después de comisiones = ingresos cobrados - comisiones de cobro.
+- Neto operativo básico = ingresos cobrados - costo de material - comisiones de cobro.
 - Balance material del periodo = material cobrado - gastos de material.
 
-El neto ganado todavía no descuenta otros costos operativos o personales como
-renta, gasolina, equipo, mantenimiento, impuestos u otros gastos no registrados
-como gasto de material del periodo.
+El neto operativo básico todavía no descuenta renta, gasolina, equipo,
+mantenimiento, impuestos ni otros gastos no registrados como gasto de material del
+periodo; por eso no debe interpretarse como ganancia final real.
 
 `TicketPago` se usa para contar tickets cobrados y vincular tickets con líneas e
 ingresos, pero no se suma como fuente independiente de dinero. `Ticket.fecha` se

@@ -319,6 +319,11 @@ class ReporteChremataPeriodoTests(TestCase):
         )
         self.assertEqual(reporte["totales"]["total_neto_estimado"], "1005.00")
         self.assertEqual(reporte["totales"]["total_neto_ganado"], "906.00")
+        self.assertEqual(reporte["totales"]["total_ingresos_cobrados"], "1005.00")
+        self.assertEqual(reporte["totales"]["total_costo_material"], "99.00")
+        self.assertEqual(reporte["totales"]["utilidad_bruta_estimada"], "906.00")
+        self.assertEqual(reporte["totales"]["total_comisiones_cobro"], "0.00")
+        self.assertEqual(reporte["totales"]["neto_operativo_basico"], "906.00")
         self.assertEqual(reporte["totales"]["balance_material_periodo"], "-19.00")
 
     def test_neto_ganado_resta_comisiones_y_gastos_material(self):
@@ -347,6 +352,11 @@ class ReporteChremataPeriodoTests(TestCase):
         )
         self.assertEqual(reporte["totales"]["total_neto_estimado"], "965.00")
         self.assertEqual(reporte["totales"]["total_neto_ganado"], "865.00")
+        self.assertEqual(reporte["totales"]["total_ingresos_cobrados"], "1000.00")
+        self.assertEqual(reporte["totales"]["total_costo_material"], "100.00")
+        self.assertEqual(reporte["totales"]["utilidad_bruta_estimada"], "900.00")
+        self.assertEqual(reporte["totales"]["total_comisiones_cobro"], "35.00")
+        self.assertEqual(reporte["totales"]["neto_operativo_basico"], "865.00")
 
     def test_limites_inicio_incluyente_fin_excluyente(self):
         inicio, fin = construir_periodo_dia(date(2026, 6, 18))
@@ -483,15 +493,20 @@ class ReporteDiarioViewTests(TestCase):
             },
             "totales": {
                 "total_bruto": "0.00",
+                "total_ingresos_cobrados": "0.00",
                 "total_procedimiento": "0.00",
                 "total_material_cobrado": "0.00",
                 "total_material_recuperado": "0.00",
                 "total_material_excedente": "0.00",
                 "total_comisiones": "0.00",
+                "total_comisiones_cobro": "0.00",
                 "total_neto_despues_comisiones": "0.00",
                 "total_neto_estimado": "0.00",
                 "total_neto_ganado": "0.00",
                 "total_gastos_material": "0.00",
+                "total_costo_material": "0.00",
+                "utilidad_bruta_estimada": "0.00",
+                "neto_operativo_basico": "0.00",
                 "balance_material_periodo": "0.00",
             },
             "actividad": {
@@ -633,7 +648,7 @@ class ReporteDiarioViewTests(TestCase):
         self.assertContains(response, "$123.00")
         self.assertContains(response, "Cobro reciente")
         self.assertContains(response, "Gasas")
-        self.assertNotContains(response, "/chremata/cajas/")
+        self.assertContains(response, f"/chremata/cajas/{caja.public_id}/")
 
     def test_url_name_resuelve_reporte_diario(self):
         match = resolve("/chremata/reportes/dia/")
@@ -695,7 +710,7 @@ class ReporteDiarioViewTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "La fecha indicada no tiene formato válido")
 
-    def test_vista_no_muestra_link_roto_a_detalle_html_de_caja(self):
+    def test_vista_muestra_link_a_detalle_html_de_caja(self):
         CajaSesion.objects.create(
             device_id="zephyros",
             abierta_en=datetime(
@@ -716,8 +731,9 @@ class ReporteDiarioViewTests(TestCase):
         )
 
         self.assertEqual(response.status_code, 200)
-        self.assertNotContains(response, "/chremata/cajas/")
-        self.assertNotContains(response, "/api/v1/chremata/cajas/")
+        self.assertContains(response, "Ver corte")
+        self.assertContains(response, "/chremata/cajas/")
+        self.assertNotContains(response, 'href="/api/v1/chremata/' + 'cajas/')
 
     def test_vista_muestra_datos_basicos_del_reporte(self):
         metodo = MetodoPago.objects.create(nombre="Efectivo")
@@ -750,7 +766,7 @@ class ReporteDiarioViewTests(TestCase):
         self.assertContains(response, "Efectivo")
         self.assertContains(response, "Consultorio")
 
-    def test_reporte_diario_muestra_neto_ganado_y_no_neto_estimado_como_tarjeta(self):
+    def test_reporte_diario_muestra_neto_operativo_basico_y_no_neto_estimado_como_tarjeta(self):
         self.login()
 
         response = self.client.get(
@@ -759,6 +775,163 @@ class ReporteDiarioViewTests(TestCase):
         )
 
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Neto ganado")
-        self.assertContains(response, "Neto después de comisiones")
-        self.assertNotContains(response, "Total neto estimado")
+        self.assertContains(response, "Neto operativo básico")
+        self.assertContains(response, "Después de comisiones")
+        self.assertNotContains(response, "Neto " + "ganado")
+        self.assertNotContains(response, "Total neto " + "estimado")
+
+
+    def test_reportes_periodo_url_names_resuelven(self):
+        self.assertEqual(resolve("/chremata/reportes/semana/").url_name, "chremata_reporte_semana")
+        self.assertEqual(resolve("/chremata/reportes/mes/").url_name, "chremata_reporte_mes")
+        self.assertEqual(resolve("/chremata/reportes/anio/").url_name, "chremata_reporte_anio")
+
+    def test_reportes_periodo_no_autenticados_redirigen_a_login(self):
+        for name, path in (
+            ("chremata_reporte_semana", "/chremata/reportes/semana/"),
+            ("chremata_reporte_mes", "/chremata/reportes/mes/"),
+            ("chremata_reporte_anio", "/chremata/reportes/anio/"),
+        ):
+            with self.subTest(name=name):
+                response = self.client.get(reverse(name))
+                self.assertEqual(response.status_code, 302)
+                self.assertIn("/accounts/login/", response["Location"])
+                self.assertIn(f"next={path}", response["Location"])
+
+    def test_reportes_periodo_autenticados_y_parametros(self):
+        self.login()
+        casos = (
+            ("chremata_reporte_semana", {"fecha": "2026-06-18"}, "semana", "Reporte semanal Chremata"),
+            ("chremata_reporte_mes", {"anio": "2026", "mes": "6"}, "mes", "Reporte mensual Chremata"),
+            ("chremata_reporte_anio", {"anio": "2026"}, "anio", "Reporte anual Chremata"),
+        )
+        for name, params, tipo, titulo in casos:
+            with self.subTest(name=name):
+                with patch("chremata.views.calcular_reporte_chremata_periodo", return_value=self.reporte_fake()) as calcular_reporte:
+                    response = self.client.get(reverse(name), params)
+                self.assertEqual(response.status_code, 200)
+                self.assertTemplateUsed(response, "chremata/reportes/periodo.html")
+                self.assertContains(response, titulo)
+                self.assertContains(response, "Neto operativo básico")
+                self.assertContains(response, "Sin datos para este periodo.")
+                self.assertEqual(calcular_reporte.call_args.kwargs["tipo_periodo"], tipo)
+
+    def test_reportes_periodo_parametros_invalidos_no_rompen(self):
+        self.login()
+        for name, params, texto in (
+            ("chremata_reporte_semana", {"fecha": "x"}, "La fecha indicada no tiene formato válido"),
+            ("chremata_reporte_mes", {"anio": "x", "mes": "99"}, "El mes o año indicado no tiene formato válido"),
+            ("chremata_reporte_anio", {"anio": "x"}, "El año indicado no tiene formato válido"),
+        ):
+            with self.subTest(name=name):
+                response = self.client.get(reverse(name), params)
+                self.assertEqual(response.status_code, 200)
+                self.assertContains(response, texto)
+                self.assertNotContains(response, "/chremata/cajas/")
+
+
+    def test_url_name_resuelve_caja_detalle(self):
+        caja_id = "12345678-1234-5678-1234-567812345678"
+        match = resolve(f"/chremata/cajas/{caja_id}/")
+
+        self.assertEqual(match.url_name, "chremata_caja_detalle")
+
+    def test_caja_detalle_no_autenticado_redirige_a_login(self):
+        caja = CajaSesion.objects.create(
+            device_id="zephyros",
+            abierta_en=datetime(2026, 6, 18, 8, 0, tzinfo=timezone.get_current_timezone()),
+            saldo_inicial_efectivo=Decimal("100.00"),
+        )
+
+        response = self.client.get(reverse("chremata_caja_detalle", kwargs={"public_id": caja.public_id}))
+
+        self.assertEqual(response.status_code, 302)
+        self.assertIn("/accounts/login/", response["Location"])
+        self.assertIn(f"next=/chremata/cajas/{caja.public_id}/", response["Location"])
+
+    def test_caja_detalle_autenticado_usa_servicio_y_renderiza(self):
+        caja = CajaSesion.objects.create(
+            device_id="zephyros",
+            abierta_en=datetime(2026, 6, 18, 8, 0, tzinfo=timezone.get_current_timezone()),
+            cerrada_en=datetime(2026, 6, 18, 14, 0, tzinfo=timezone.get_current_timezone()),
+            estado=CajaSesion.ESTADO_CERRADA,
+            saldo_inicial_efectivo=Decimal("100.00"),
+            efectivo_contado_cierre=Decimal("250.00"),
+            notas_apertura="Inicio de consulta",
+            notas_cierre="Cierre normal",
+        )
+        corte = self.reporte_fake()
+        corte.update({
+            "contract": "chremata.corte_caja.v1",
+            "caja": {
+                "caja_public_id": str(caja.public_id),
+                "estado": "cerrada",
+                "device_id": "zephyros",
+                "caja_fisica": None,
+                "abierta_en": "2026-06-18T13:00:00Z",
+                "cerrada_en": "2026-06-18T19:00:00Z",
+            },
+            "efectivo": {
+                "saldo_inicial_efectivo": "100.00",
+                "total_efectivo": "200.00",
+                "efectivo_esperado": "250.00",
+                "efectivo_contado_cierre": "250.00",
+                "diferencia_efectivo": "0.00",
+            },
+            "totales": {
+                "total_bruto": "300.00",
+                "total_efectivo": "200.00",
+                "total_tarjeta": "100.00",
+                "total_transferencia": "0.00",
+                "total_material_cobrado": "50.00",
+                "total_comisiones": "5.00",
+                "total_neto_estimado": "295.00",
+            },
+            "totales_por_metodo": [{"metodo_pago": "Efectivo", "cantidad": 1, "total_bruto": "200.00", "total_comisiones": "0.00", "total_neto_estimado": "200.00"}],
+            "totales_por_canal": [{"canal_cobro": "Efectivo en caja", "metodo_pago": "Efectivo", "cantidad": 1, "total_bruto": "200.00", "total_comisiones": "0.00", "total_neto_estimado": "200.00"}],
+            "totales_por_concepto": [{"concepto": "Consulta", "cantidad_total": "1.00", "lineas": 1, "total": "300.00", "material_cobrado": "50.00"}],
+            "gastos_material": {"cantidad": 1, "total_gastos_material": "50.00", "detalle": [{"fecha": "2026-06-18T15:00:00Z", "monto": "50.00", "descripcion": "Gasas", "notas": "Caja"}]},
+            "tickets": {"tickets_cobrados": 1, "tickets_pendientes_creados_durante_caja": 0, "tickets_cancelados_creados_durante_caja": 0, "tickets_abandonados_creados_durante_caja": 0},
+        })
+        self.login()
+
+        with patch("chremata.views.calcular_corte_caja", return_value=corte) as calcular_corte:
+            response = self.client.get(reverse("chremata_caja_detalle", kwargs={"public_id": caja.public_id}))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTemplateUsed(response, "chremata/cajas/detalle.html")
+        calcular_corte.assert_called_once_with(caja)
+        self.assertContains(response, "Corte de caja")
+        self.assertContains(response, "zephyros")
+        self.assertContains(response, "cerrada")
+        self.assertContains(response, "Inicio de consulta")
+        self.assertContains(response, "Cierre normal")
+        self.assertContains(response, "$100.00")
+        self.assertContains(response, "$250.00")
+        self.assertContains(response, "Gasas")
+        self.assertContains(response, "Consulta")
+        self.assertContains(response, "Efectivo en caja")
+        self.assertContains(response, "Tickets cobrados")
+        self.assertNotContains(response, 'href="/api/v1/chremata/' + 'cajas/')
+
+    def test_caja_detalle_inexistente_devuelve_404(self):
+        self.login()
+
+        response = self.client.get(reverse("chremata_caja_detalle", kwargs={"public_id": "12345678-1234-5678-1234-567812345678"}))
+
+        self.assertEqual(response.status_code, 404)
+
+    def test_caja_detalle_abierta_sin_datos_carga_sin_romper(self):
+        caja = CajaSesion.objects.create(
+            device_id="zephyros",
+            abierta_en=datetime(2026, 6, 18, 8, 0, tzinfo=timezone.get_current_timezone()),
+            saldo_inicial_efectivo=Decimal("100.00"),
+        )
+        self.login()
+
+        response = self.client.get(reverse("chremata_caja_detalle", kwargs={"public_id": caja.public_id}))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Caja abierta / cierre pendiente")
+        self.assertContains(response, "Sin datos para esta sección.")
+        self.assertNotContains(response, 'href="/api/v1/chremata/' + 'cajas/')

@@ -138,8 +138,14 @@ reporte diario cuando intersecta el periodo. El dinero del reporte sale de `Ingr
 el desglose por concepto sale de `TicketLinea`, y los gastos de material entran por la
 fecha propia de `GastoMaterial`.
 
-Todavía no hay dashboard principal ni reportes semanal, mensual o anual en HTML; esta
-fase solo expone la vista diaria.
+También están disponibles reportes HTML de calendario en `/chremata/reportes/semana/`,
+`/chremata/reportes/mes/` y `/chremata/reportes/anio/`. Todos requieren login de
+Django y reutilizan el mismo servicio de reportes por periodo que el reporte diario.
+
+El corte HTML de una sesión de caja está en `/chremata/cajas/<public_id>/`. Requiere
+login, puede consultarse desde teléfono en la red local, usa `calcular_corte_caja()`
+y es distinto del endpoint API `/api/v1/chremata/cajas/<caja_public_id>/corte/` que
+consume Zephyros.
 
 ## Dashboard principal de Chremata
 
@@ -158,18 +164,22 @@ mantenimiento detallado de catálogos y revisión de registros. Tampoco reemplaz
 corte de caja, porque el corte pertenece a una `CajaSesion` operativa y puede cruzar
 medianoche. El reporte diario detallado sigue disponible en `/chremata/reportes/dia/`.
 
-En esta fase no hay vistas HTML de reporte semanal, mensual, anual ni detalle de caja;
-los indicadores semanales y mensuales del dashboard son solo resumen operativo.
+El dashboard enlaza a los reportes HTML diario, semanal, mensual y anual. Si hay una
+caja abierta o una última caja, también enlaza a su corte HTML en `/chremata/cajas/<public_id>/`.
+El corte HTML es una vista humana; el endpoint API de corte sigue existiendo para integración.
 
 ### Lectura de métricas monetarias
 
 En los reportes y el dashboard de Chremata:
 
-- **Neto después de comisiones** = bruto - comisiones de cobro.
-- **Neto ganado** = bruto - comisiones de cobro - gastos de material del periodo.
-- **Balance material del periodo** = material cobrado - gastos de material.
+- **Ingresos cobrados** = total cobrado del periodo.
+- **Costo de material** = gastos de material registrados por fecha del periodo.
+- **Utilidad bruta estimada** = ingresos cobrados - costo de material.
+- **Comisiones de cobro** = comisiones de canal o procesador guardadas en los ingresos.
+- **Neto operativo básico** = ingresos cobrados - costo de material - comisiones de cobro.
+- **Balance material del periodo** = material cobrado - costo de material.
 
-El balance material no es la ganancia neta: solo compara lo cobrado para recuperar
-material contra lo gastado en material dentro del mismo periodo. El neto ganado
-todavía no descuenta otros costos como renta, gasolina, equipo, mantenimiento,
-impuestos u otros gastos que no estén registrados como gasto de material.
+El balance material no es una utilidad: solo compara lo cobrado para recuperar
+material contra lo gastado en material dentro del mismo periodo. El neto operativo
+básico tampoco es ganancia final real: todavía no descuenta renta, gasolina, equipo,
+mantenimiento, impuestos ni otros gastos no registrados.

@@ -117,6 +117,35 @@ python manage.py test chremata
 git diff --check
 ```
 
+## Vistas HTML de Chremata
+
+Las vistas HTML de Chremata requieren login de Django:
+
+- `/chremata/`: dashboard operativo con Hoy, Esta semana y Este mes.
+- `/chremata/reportes/dia/`: reporte diario de calendario local.
+- `/chremata/reportes/semana/`: reporte semanal ISO, de lunes a lunes.
+- `/chremata/reportes/mes/`: reporte mensual.
+- `/chremata/reportes/anio/`: reporte anual.
+- `/chremata/cajas/<public_id>/`: corte HTML de una sesión de caja.
+
+Estos reportes son calendarios y no reemplazan el corte de caja. Una `CajaSesion`
+puede cruzar medianoche y se muestra como complemento informativo cuando intersecta
+el periodo; el corte operativo de caja sigue siendo independiente. La vista HTML de
+caja requiere login, usa el servicio oficial `calcular_corte_caja()` y es distinta
+del endpoint API usado por Zephyros.
+
+Nomenclatura contable visible:
+
+- **Ingresos cobrados** = total cobrado del periodo.
+- **Costo de material** = gastos de material del periodo.
+- **Utilidad bruta estimada** = ingresos cobrados - costo de material.
+- **Comisiones de cobro** = comisiones de canal/procesador.
+- **Neto operativo básico** = ingresos cobrados - costo de material - comisiones de cobro.
+- **Balance material del periodo** = material cobrado - costo de material.
+
+El neto operativo básico no es ganancia final real: todavía no descuenta renta,
+gasolina, equipo, mantenimiento, impuestos ni otros gastos no registrados.
+
 ## Endpoints principales
 
 Todos los endpoints bajo `/api/` requieren `X-Archeion-Device-Token`.

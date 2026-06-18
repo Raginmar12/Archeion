@@ -11,9 +11,10 @@
   </div>
   <nav class="quick-links" aria-label="Accesos principales">
     <a class="button-link" href="{% url 'chremata_reporte_diario' %}">Reporte diario</a>
+    <a class="button-link" href="{% url 'chremata_reporte_semana' %}">Reporte semanal</a>
+    <a class="button-link" href="{% url 'chremata_reporte_mes' %}">Reporte mensual</a>
+    <a class="button-link" href="{% url 'chremata_reporte_anio' %}">Reporte anual</a>
     <a class="button-link secondary" href="{% url 'admin:index' %}">Admin</a>
-    <span class="button-link disabled">Semanal pendiente</span>
-    <span class="button-link disabled">Mensual pendiente</span>
   </nav>
 </section>
 
@@ -21,12 +22,14 @@
   <article class="dashboard-card highlight-card">
     <h2>Hoy</h2>
     <dl class="metric-list">
-      <div><dt>Total bruto</dt><dd>${{ reporte_hoy.totales.total_bruto }}</dd></div>
-      <div><dt>Neto ganado</dt><dd>${{ reporte_hoy.totales.total_neto_ganado }}</dd></div>
-      <div><dt>Neto después de comisiones</dt><dd>${{ reporte_hoy.totales.total_neto_despues_comisiones }}</dd></div>
+      <div><dt>Ingresos cobrados</dt><dd>${{ reporte_hoy.totales.total_ingresos_cobrados }}</dd></div>
+      <div><dt>Neto operativo básico</dt><dd>${{ reporte_hoy.totales.neto_operativo_basico }}</dd></div>
+      <div><dt>Después de comisiones</dt><dd>${{ reporte_hoy.totales.total_neto_despues_comisiones }}</dd></div>
       <div><dt>Tickets cobrados</dt><dd>{{ reporte_hoy.actividad.tickets_cobrados }}</dd></div>
-      <div><dt>Gastos de material</dt><dd>${{ reporte_hoy.totales.total_gastos_material }}</dd></div>
-      <div><dt>Balance material</dt><dd>${{ reporte_hoy.totales.balance_material_periodo }}</dd></div>
+      <div><dt>Costo de material</dt><dd>${{ reporte_hoy.totales.total_costo_material }}</dd></div>
+      <div class="secondary-metric"><dt>Utilidad bruta estimada</dt><dd>${{ reporte_hoy.totales.utilidad_bruta_estimada }}</dd></div>
+      <div class="secondary-metric"><dt>Comisiones de cobro</dt><dd>${{ reporte_hoy.totales.total_comisiones_cobro }}</dd></div>
+      <div class="secondary-metric"><dt>Balance material</dt><dd>${{ reporte_hoy.totales.balance_material_periodo }}</dd></div>
     </dl>
     <a href="{% url 'chremata_reporte_diario' %}?fecha={{ fecha_hoy|date:'Y-m-d' }}">Ver reporte diario</a>
   </article>
@@ -34,22 +37,28 @@
   <article class="dashboard-card">
     <h2>Esta semana</h2>
     <dl class="metric-list">
-      <div><dt>Total bruto</dt><dd>${{ reporte_semana.totales.total_bruto }}</dd></div>
-      <div><dt>Neto ganado</dt><dd>${{ reporte_semana.totales.total_neto_ganado }}</dd></div>
-      <div><dt>Neto después de comisiones</dt><dd>${{ reporte_semana.totales.total_neto_despues_comisiones }}</dd></div>
+      <div><dt>Ingresos cobrados</dt><dd>${{ reporte_semana.totales.total_ingresos_cobrados }}</dd></div>
+      <div><dt>Neto operativo básico</dt><dd>${{ reporte_semana.totales.neto_operativo_basico }}</dd></div>
+      <div><dt>Después de comisiones</dt><dd>${{ reporte_semana.totales.total_neto_despues_comisiones }}</dd></div>
       <div><dt>Tickets cobrados</dt><dd>{{ reporte_semana.actividad.tickets_cobrados }}</dd></div>
-      <div><dt>Gastos de material</dt><dd>${{ reporte_semana.totales.total_gastos_material }}</dd></div>
+      <div><dt>Costo de material</dt><dd>${{ reporte_semana.totales.total_costo_material }}</dd></div>
+      <div class="secondary-metric"><dt>Utilidad bruta estimada</dt><dd>${{ reporte_semana.totales.utilidad_bruta_estimada }}</dd></div>
+      <div class="secondary-metric"><dt>Comisiones de cobro</dt><dd>${{ reporte_semana.totales.total_comisiones_cobro }}</dd></div>
+      <div class="secondary-metric"><dt>Balance material</dt><dd>${{ reporte_semana.totales.balance_material_periodo }}</dd></div>
     </dl>
   </article>
 
   <article class="dashboard-card">
     <h2>Este mes</h2>
     <dl class="metric-list">
-      <div><dt>Total bruto</dt><dd>${{ reporte_mes.totales.total_bruto }}</dd></div>
-      <div><dt>Neto ganado</dt><dd>${{ reporte_mes.totales.total_neto_ganado }}</dd></div>
-      <div><dt>Neto después de comisiones</dt><dd>${{ reporte_mes.totales.total_neto_despues_comisiones }}</dd></div>
+      <div><dt>Ingresos cobrados</dt><dd>${{ reporte_mes.totales.total_ingresos_cobrados }}</dd></div>
+      <div><dt>Neto operativo básico</dt><dd>${{ reporte_mes.totales.neto_operativo_basico }}</dd></div>
+      <div><dt>Después de comisiones</dt><dd>${{ reporte_mes.totales.total_neto_despues_comisiones }}</dd></div>
       <div><dt>Tickets cobrados</dt><dd>{{ reporte_mes.actividad.tickets_cobrados }}</dd></div>
-      <div><dt>Gastos de material</dt><dd>${{ reporte_mes.totales.total_gastos_material }}</dd></div>
+      <div><dt>Costo de material</dt><dd>${{ reporte_mes.totales.total_costo_material }}</dd></div>
+      <div class="secondary-metric"><dt>Utilidad bruta estimada</dt><dd>${{ reporte_mes.totales.utilidad_bruta_estimada }}</dd></div>
+      <div class="secondary-metric"><dt>Comisiones de cobro</dt><dd>${{ reporte_mes.totales.total_comisiones_cobro }}</dd></div>
+      <div class="secondary-metric"><dt>Balance material</dt><dd>${{ reporte_mes.totales.balance_material_periodo }}</dd></div>
     </dl>
   </article>
 
@@ -69,7 +78,7 @@
           <div><dt>Diferencia</dt><dd>${{ caja_resumen.diferencia_efectivo }}</dd></div>
         {% endif %}
       </dl>
-      <p class="muted">Detalle HTML de caja pendiente.</p>
+      <p><a href="{% url 'chremata_caja_detalle' caja_resumen.public_id %}">Ver corte</a></p>
     {% else %}
       <p class="empty">Sin cajas registradas.</p>
     {% endif %}
