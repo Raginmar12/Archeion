@@ -36,6 +36,7 @@ class Command(BaseCommand):
 
         procesadas = 0
         actualizadas = 0
+        omitidas = 0
 
         with transaction.atomic():
             for caja in cajas.select_for_update().order_by("abierta_en", "id"):
@@ -51,6 +52,22 @@ class Command(BaseCommand):
                 corte = calcular_corte_caja(caja)
                 efectivo = corte["efectivo"]
                 esperado_nuevo = Decimal(efectivo["efectivo_esperado"])
+                if efectivo["diferencia_efectivo"] is None:
+                    omitidas += 1
+                    motivo = (
+                        "efectivo_contado_cierre vacío / "
+                        "diferencia_efectivo no calculable"
+                    )
+                    mensaje = f"caja_public_id={caja.public_id} omitida: motivo={motivo}."
+                    if caja_public_id:
+                        raise CommandError(
+                            "La CajaSesion cerrada con "
+                            f"caja_public_id={caja.public_id} no tiene "
+                            "efectivo contado de cierre y no puede "
+                            "recalcular diferencia_efectivo."
+                        )
+                    self.stderr.write(self.style.WARNING(mensaje))
+                    continue
                 diferencia_nueva = Decimal(efectivo["diferencia_efectivo"])
 
                 corte_para_comparar = dict(corte)
@@ -107,6 +124,8 @@ class Command(BaseCommand):
 
         self.stdout.write(
             self.style.SUCCESS(
-                f"Cajas procesadas: {procesadas}. Cajas con cambios: {actualizadas}."
+                "Cajas procesadas: "
+                f"{procesadas}. Cajas con cambios: {actualizadas}. "
+                f"Cajas omitidas: {omitidas}."
             )
         )

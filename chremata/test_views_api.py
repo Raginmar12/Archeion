@@ -2720,6 +2720,23 @@ class CorteCajaApiTests(TestCase):
         self.caja.save()
         return self.caja
 
+    def crear_caja_cerrada_sin_efectivo_contado(self):
+        return CajaSesion.objects.create(
+            device_id="zephyros-inconsistente",
+            estado=CajaSesion.ESTADO_CERRADA,
+            abierta_en=datetime(2026, 6, 18, 8, 0, tzinfo=datetime_timezone.utc),
+            cerrada_en=datetime(2026, 6, 18, 9, 0, tzinfo=datetime_timezone.utc),
+            saldo_inicial_efectivo=Decimal("50.00"),
+            efectivo_esperado=Decimal("999.00"),
+            diferencia_efectivo=Decimal("888.00"),
+            resumen_snapshot={
+                "efectivo": {
+                    "efectivo_esperado": "999.00",
+                    "diferencia_efectivo": "888.00",
+                }
+            },
+        )
+
     def test_recalcular_cortes_caja_dry_run_no_modifica(self):
         caja = self.preparar_caja_cerrada_con_snapshot_viejo()
         salida = StringIO()
@@ -2817,6 +2834,77 @@ class CorteCajaApiTests(TestCase):
         self.assertEqual(caja.efectivo_esperado, esperado)
         self.assertEqual(caja.diferencia_efectivo, diferencia)
         self.assertEqual(caja.resumen_snapshot, snapshot)
+
+    def test_recalcular_cortes_caja_omite_cerrada_sin_efectivo_y_continua(self):
+        caja_valida = self.preparar_caja_cerrada_con_snapshot_viejo()
+        caja_inconsistente = self.crear_caja_cerrada_sin_efectivo_contado()
+        salida = StringIO()
+        errores = StringIO()
+
+        call_command("recalcular_cortes_caja", stdout=salida, stderr=errores)
+
+        caja_valida.refresh_from_db()
+        caja_inconsistente.refresh_from_db()
+        self.assertEqual(caja_valida.efectivo_esperado, Decimal("580.00"))
+        self.assertEqual(caja_valida.diferencia_efectivo, Decimal("0.00"))
+        self.assertEqual(caja_inconsistente.efectivo_esperado, Decimal("999.00"))
+        self.assertEqual(caja_inconsistente.diferencia_efectivo, Decimal("888.00"))
+        self.assertIsNone(caja_inconsistente.efectivo_contado_cierre)
+        self.assertIn(
+            f"caja_public_id={caja_inconsistente.public_id}",
+            errores.getvalue(),
+        )
+        self.assertIn("efectivo_contado_cierre vacío", errores.getvalue())
+        self.assertIn("Cajas omitidas: 1", salida.getvalue())
+
+    def test_recalcular_cortes_caja_public_id_sin_efectivo_contado_falla(self):
+        caja_inconsistente = self.crear_caja_cerrada_sin_efectivo_contado()
+
+        with self.assertRaisesMessage(
+            CommandError,
+            "no tiene efectivo contado de cierre",
+        ):
+            call_command(
+                "recalcular_cortes_caja",
+                "--caja-public-id",
+                str(caja_inconsistente.public_id),
+                stdout=StringIO(),
+                stderr=StringIO(),
+            )
+
+        caja_inconsistente.refresh_from_db()
+        self.assertEqual(caja_inconsistente.efectivo_esperado, Decimal("999.00"))
+        self.assertEqual(caja_inconsistente.diferencia_efectivo, Decimal("888.00"))
+        self.assertEqual(
+            caja_inconsistente.resumen_snapshot["efectivo"]["efectivo_esperado"],
+            "999.00",
+        )
+
+    def test_recalcular_cortes_caja_dry_run_omite_sin_efectivo_y_no_modifica(self):
+        caja_valida = self.preparar_caja_cerrada_con_snapshot_viejo()
+        caja_inconsistente = self.crear_caja_cerrada_sin_efectivo_contado()
+        salida = StringIO()
+        errores = StringIO()
+
+        call_command(
+            "recalcular_cortes_caja",
+            "--dry-run",
+            stdout=salida,
+            stderr=errores,
+        )
+
+        caja_valida.refresh_from_db()
+        caja_inconsistente.refresh_from_db()
+        self.assertEqual(caja_valida.efectivo_esperado, Decimal("700.00"))
+        self.assertEqual(caja_valida.diferencia_efectivo, Decimal("-120.00"))
+        self.assertEqual(caja_inconsistente.efectivo_esperado, Decimal("999.00"))
+        self.assertEqual(caja_inconsistente.diferencia_efectivo, Decimal("888.00"))
+        self.assertIn("DRY-RUN", salida.getvalue())
+        self.assertIn("Cajas omitidas: 1", salida.getvalue())
+        self.assertIn(
+            f"caja_public_id={caja_inconsistente.public_id}",
+            errores.getvalue(),
+        )
 
     def test_recalcular_cortes_caja_caja_public_id_inexistente_falla(self):
         with self.assertRaisesMessage(CommandError, "No existe una CajaSesion cerrada"):
