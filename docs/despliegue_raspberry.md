@@ -33,6 +33,7 @@ Ejemplo sin secretos reales:
 ```bash
 DJANGO_SETTINGS_MODULE=archeion.settings
 ALLOWED_HOSTS=127.0.0.1,localhost,archeion,archeion.local,192.168.1.50
+ARCHEION_TIME_ZONE=America/Matamoros
 # SECRET_KEY=definir_fuera_del_repositorio_si_se_formaliza_produccion
 # DEBUG=False cuando se formalice despliegue no-dev
 ```
@@ -40,6 +41,18 @@ ALLOWED_HOSTS=127.0.0.1,localhost,archeion,archeion.local,192.168.1.50
 La variable `ALLOWED_HOSTS` debe incluir el hostname o la IP fija/reservada que Zephyros usa en `archeion_base_url`; por ejemplo, la IP LAN de la Raspberry.
 
 Pendiente: definir variables finales requeridas para el servicio permanente.
+
+## Zona horaria local
+
+Archeion debe operar con la zona horaria local de la Raspberry para que el admin y los reportes Chremata por día, semana, mes y año agrupen las operaciones según el calendario operativo local. En la frontera norte de Tamaulipas la configuración recomendada es:
+
+```bash
+ARCHEION_TIME_ZONE=America/Matamoros
+```
+
+Django mantiene `USE_TZ=True`, por lo que los datetimes se manejan de forma timezone-aware y se guardan de manera segura. La zona configurada con `ARCHEION_TIME_ZONE` controla la presentación y agrupación local en Django, incluyendo admin y reportes.
+
+Zephyros puede seguir enviando timestamps UTC en sus contratos actuales; Archeion los interpreta como datetimes con zona horaria y los presenta/agrupa usando la zona local configurada.
 
 ## Migrar
 
