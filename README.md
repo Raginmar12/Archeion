@@ -96,8 +96,8 @@ Ejemplo sin secretos reales:
 {
   "device_id": "zephyros-cardputer-principal",
   "archeion_base_url": "http://192.168.1.50:8000",
-  "archeion_device_token": "REEMPLAZAR_CON_TOKEN_LOCAL",
-  "timezone": "America/Mexico_City"
+  "device_token": "REEMPLAZAR_CON_TOKEN_LOCAL",
+  "device_timezone": "America/Mexico_City"
 }
 ```
 
