@@ -373,8 +373,14 @@ def calcular_reporte_chremata_periodo(inicio, fin, *, tipo_periodo=None):
     total_material_recuperado = _sumar(ingresos, "material_recuperado")
     total_material_excedente = _sumar(ingresos, "material_excedente")
     total_comisiones = _sumar(ingresos, "comision")
-    total_neto_estimado = _sumar(ingresos, "monto_neto")
     total_gastos_material = _sumar(gastos, "monto")
+    total_neto_despues_comisiones = (total_bruto - total_comisiones).quantize(
+        PESOS_DECIMALES
+    )
+    total_neto_estimado = total_neto_despues_comisiones
+    total_neto_ganado = (
+        total_neto_despues_comisiones - total_gastos_material
+    ).quantize(PESOS_DECIMALES)
     balance_material_periodo = (total_material_cobrado - total_gastos_material).quantize(
         PESOS_DECIMALES
     )
@@ -407,7 +413,11 @@ def calcular_reporte_chremata_periodo(inicio, fin, *, tipo_periodo=None):
             "total_material_recuperado": _money(total_material_recuperado),
             "total_material_excedente": _money(total_material_excedente),
             "total_comisiones": _money(total_comisiones),
+            "total_neto_despues_comisiones": _money(
+                total_neto_despues_comisiones
+            ),
             "total_neto_estimado": _money(total_neto_estimado),
+            "total_neto_ganado": _money(total_neto_ganado),
             "total_gastos_material": _money(total_gastos_material),
             "balance_material_periodo": _money(balance_material_periodo),
         },

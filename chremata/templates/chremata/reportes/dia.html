@@ -35,8 +35,12 @@
     <strong>${{ reporte.totales.total_bruto }}</strong>
   </article>
   <article class="card">
-    <span>Total neto estimado</span>
-    <strong>${{ reporte.totales.total_neto_estimado }}</strong>
+    <span>Neto después de comisiones</span>
+    <strong>${{ reporte.totales.total_neto_despues_comisiones }}</strong>
+  </article>
+  <article class="card">
+    <span>Neto ganado</span>
+    <strong>${{ reporte.totales.total_neto_ganado }}</strong>
   </article>
   <article class="card">
     <span>Total comisiones</span>
@@ -69,7 +73,7 @@
   {% if reporte.por_metodo %}
     <div class="table-wrapper">
       <table>
-        <thead><tr><th>Método</th><th>Cantidad</th><th>Bruto</th><th>Comisiones</th><th>Neto estimado</th></tr></thead>
+        <thead><tr><th>Método</th><th>Cantidad</th><th>Bruto</th><th>Comisiones</th><th>Neto después de comisiones</th></tr></thead>
         <tbody>
           {% for item in reporte.por_metodo %}
             <tr><td>{{ item.metodo_pago }}</td><td>{{ item.cantidad }}</td><td>${{ item.total_bruto }}</td><td>${{ item.total_comisiones }}</td><td>${{ item.total_neto_estimado }}</td></tr>
@@ -87,7 +91,7 @@
   {% if reporte.por_canal %}
     <div class="table-wrapper">
       <table>
-        <thead><tr><th>Canal</th><th>Método</th><th>Cantidad</th><th>Bruto</th><th>Comisiones</th><th>Neto estimado</th></tr></thead>
+        <thead><tr><th>Canal</th><th>Método</th><th>Cantidad</th><th>Bruto</th><th>Comisiones</th><th>Neto después de comisiones</th></tr></thead>
         <tbody>
           {% for item in reporte.por_canal %}
             <tr><td>{{ item.canal_cobro }}</td><td>{{ item.metodo_pago }}</td><td>{{ item.cantidad }}</td><td>${{ item.total_bruto }}</td><td>${{ item.total_comisiones }}</td><td>${{ item.total_neto_estimado }}</td></tr>
@@ -123,7 +127,7 @@
   {% if reporte.por_origen %}
     <div class="table-wrapper">
       <table>
-        <thead><tr><th>Origen</th><th>Cantidad</th><th>Bruto</th><th>Neto estimado</th></tr></thead>
+        <thead><tr><th>Origen</th><th>Cantidad</th><th>Bruto</th><th>Neto después de comisiones</th></tr></thead>
         <tbody>
           {% for item in reporte.por_origen %}
             <tr><td>{{ item.origen }}</td><td>{{ item.cantidad }}</td><td>${{ item.total_bruto }}</td><td>${{ item.total_neto_estimado }}</td></tr>

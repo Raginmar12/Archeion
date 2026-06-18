@@ -203,7 +203,12 @@ class ReporteChremataPeriodoTests(TestCase):
         self.assertEqual(reporte["periodo"]["timezone"], "America/Matamoros")
         self.assertEqual(reporte["totales"]["total_bruto"], "600.00")
         self.assertEqual(reporte["totales"]["total_comisiones"], "20.00")
+        self.assertEqual(
+            reporte["totales"]["total_neto_despues_comisiones"],
+            "580.00",
+        )
         self.assertEqual(reporte["totales"]["total_neto_estimado"], "580.00")
+        self.assertEqual(reporte["totales"]["total_neto_ganado"], "580.00")
         self.assertEqual(reporte["actividad"]["ingresos"], 3)
         self.assertEqual(reporte["actividad"]["tickets_cobrados"], 3)
         self.assertEqual(reporte["actividad"]["promedio_por_ticket"], "200.00")
@@ -288,6 +293,60 @@ class ReporteChremataPeriodoTests(TestCase):
         self.assertEqual(reporte["gastos_material"]["sin_caja"]["total"], "15.00")
         self.assertEqual(reporte["gastos_material"]["por_caja"][0]["total"], "40.00")
         self.assertEqual(reporte["por_concepto"][0]["material_cobrado"], "25.00")
+
+    def test_neto_ganado_resta_gastos_material_sin_comisiones(self):
+        GastoMaterial.objects.create(
+            fecha=self.dt(2026, 6, 18, 9, 0),
+            monto=Decimal("99.00"),
+            descripcion="Material del día",
+        )
+        Ingreso.objects.create(
+            fecha=self.dt(2026, 6, 18, 10, 0),
+            monto_procedimiento=Decimal("925.00"),
+            monto_material_cobrado=Decimal("80.00"),
+            concepto=self.concepto_material,
+            canal_cobro=self.canal_efectivo,
+            origen=self.origen,
+        )
+
+        reporte = self.calcular_dia()
+
+        self.assertEqual(reporte["totales"]["total_bruto"], "1005.00")
+        self.assertEqual(reporte["totales"]["total_comisiones"], "0.00")
+        self.assertEqual(
+            reporte["totales"]["total_neto_despues_comisiones"],
+            "1005.00",
+        )
+        self.assertEqual(reporte["totales"]["total_neto_estimado"], "1005.00")
+        self.assertEqual(reporte["totales"]["total_neto_ganado"], "906.00")
+        self.assertEqual(reporte["totales"]["balance_material_periodo"], "-19.00")
+
+    def test_neto_ganado_resta_comisiones_y_gastos_material(self):
+        GastoMaterial.objects.create(
+            fecha=self.dt(2026, 6, 18, 9, 0),
+            monto=Decimal("100.00"),
+            descripcion="Material del día",
+        )
+        Ingreso.objects.create(
+            fecha=self.dt(2026, 6, 18, 10, 0),
+            monto_procedimiento=Decimal("1000.00"),
+            concepto=self.concepto_consulta,
+            canal_cobro=self.canal_efectivo,
+            origen=self.origen,
+            comision_manual=True,
+            comision=Decimal("35.00"),
+        )
+
+        reporte = self.calcular_dia()
+
+        self.assertEqual(reporte["totales"]["total_bruto"], "1000.00")
+        self.assertEqual(reporte["totales"]["total_comisiones"], "35.00")
+        self.assertEqual(
+            reporte["totales"]["total_neto_despues_comisiones"],
+            "965.00",
+        )
+        self.assertEqual(reporte["totales"]["total_neto_estimado"], "965.00")
+        self.assertEqual(reporte["totales"]["total_neto_ganado"], "865.00")
 
     def test_limites_inicio_incluyente_fin_excluyente(self):
         inicio, fin = construir_periodo_dia(date(2026, 6, 18))
@@ -429,7 +488,9 @@ class ReporteDiarioViewTests(TestCase):
                 "total_material_recuperado": "0.00",
                 "total_material_excedente": "0.00",
                 "total_comisiones": "0.00",
+                "total_neto_despues_comisiones": "0.00",
                 "total_neto_estimado": "0.00",
+                "total_neto_ganado": "0.00",
                 "total_gastos_material": "0.00",
                 "balance_material_periodo": "0.00",
             },
@@ -688,3 +749,16 @@ class ReporteDiarioViewTests(TestCase):
         self.assertContains(response, "$123.00")
         self.assertContains(response, "Efectivo")
         self.assertContains(response, "Consultorio")
+
+    def test_reporte_diario_muestra_neto_ganado_y_no_neto_estimado_como_tarjeta(self):
+        self.login()
+
+        response = self.client.get(
+            reverse("chremata_reporte_diario"),
+            {"fecha": "2026-06-18"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Neto ganado")
+        self.assertContains(response, "Neto después de comisiones")
+        self.assertNotContains(response, "Total neto estimado")

@@ -255,7 +255,7 @@ La respuesta usa el contrato `chremata.corte_caja.v1` e incluye estas secciones 
 
 - `caja`: datos de la `CajaSesion`, su estado, horarios y caja física asociada cuando exista.
 - `efectivo`: `saldo_inicial_efectivo`, `total_efectivo`, `efectivo_esperado`, `efectivo_contado_cierre` y `diferencia_efectivo`.
-- `totales`: bruto, efectivo, tarjeta, transferencia, material cobrado, comisiones y neto estimado.
+- `totales`: bruto, efectivo, tarjeta, transferencia, material cobrado, comisiones y neto después de comisiones.
 - `totales_por_metodo`: agrupación por método de pago.
 - `totales_por_canal`: agrupación por canal de cobro.
 - `totales_por_concepto`: agrupación por conceptos tomados desde `TicketLinea`, no desde el concepto resumen del pago.
