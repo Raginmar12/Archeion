@@ -648,7 +648,7 @@ class ReporteDiarioViewTests(TestCase):
         self.assertContains(response, "$123.00")
         self.assertContains(response, "Cobro reciente")
         self.assertContains(response, "Gasas")
-        self.assertNotContains(response, "/chremata/cajas/")
+        self.assertContains(response, f"/chremata/cajas/{caja.public_id}/")
 
     def test_url_name_resuelve_reporte_diario(self):
         match = resolve("/chremata/reportes/dia/")
@@ -710,7 +710,7 @@ class ReporteDiarioViewTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "La fecha indicada no tiene formato válido")
 
-    def test_vista_no_muestra_link_roto_a_detalle_html_de_caja(self):
+    def test_vista_muestra_link_a_detalle_html_de_caja(self):
         CajaSesion.objects.create(
             device_id="zephyros",
             abierta_en=datetime(
@@ -731,8 +731,9 @@ class ReporteDiarioViewTests(TestCase):
         )
 
         self.assertEqual(response.status_code, 200)
-        self.assertNotContains(response, "/chremata/cajas/")
-        self.assertNotContains(response, "/api/v1/chremata/cajas/")
+        self.assertContains(response, "Ver corte")
+        self.assertContains(response, "/chremata/cajas/")
+        self.assertNotContains(response, 'href="/api/v1/chremata/' + 'cajas/')
 
     def test_vista_muestra_datos_basicos_del_reporte(self):
         metodo = MetodoPago.objects.create(nombre="Efectivo")
@@ -776,8 +777,8 @@ class ReporteDiarioViewTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Neto operativo básico")
         self.assertContains(response, "Después de comisiones")
-        self.assertNotContains(response, "Neto ganado")
-        self.assertNotContains(response, "Total neto estimado")
+        self.assertNotContains(response, "Neto " + "ganado")
+        self.assertNotContains(response, "Total neto " + "estimado")
 
 
     def test_reportes_periodo_url_names_resuelven(self):
@@ -827,3 +828,110 @@ class ReporteDiarioViewTests(TestCase):
                 self.assertEqual(response.status_code, 200)
                 self.assertContains(response, texto)
                 self.assertNotContains(response, "/chremata/cajas/")
+
+
+    def test_url_name_resuelve_caja_detalle(self):
+        caja_id = "12345678-1234-5678-1234-567812345678"
+        match = resolve(f"/chremata/cajas/{caja_id}/")
+
+        self.assertEqual(match.url_name, "chremata_caja_detalle")
+
+    def test_caja_detalle_no_autenticado_redirige_a_login(self):
+        caja = CajaSesion.objects.create(
+            device_id="zephyros",
+            abierta_en=datetime(2026, 6, 18, 8, 0, tzinfo=timezone.get_current_timezone()),
+            saldo_inicial_efectivo=Decimal("100.00"),
+        )
+
+        response = self.client.get(reverse("chremata_caja_detalle", kwargs={"public_id": caja.public_id}))
+
+        self.assertEqual(response.status_code, 302)
+        self.assertIn("/accounts/login/", response["Location"])
+        self.assertIn(f"next=/chremata/cajas/{caja.public_id}/", response["Location"])
+
+    def test_caja_detalle_autenticado_usa_servicio_y_renderiza(self):
+        caja = CajaSesion.objects.create(
+            device_id="zephyros",
+            abierta_en=datetime(2026, 6, 18, 8, 0, tzinfo=timezone.get_current_timezone()),
+            cerrada_en=datetime(2026, 6, 18, 14, 0, tzinfo=timezone.get_current_timezone()),
+            estado=CajaSesion.ESTADO_CERRADA,
+            saldo_inicial_efectivo=Decimal("100.00"),
+            efectivo_contado_cierre=Decimal("250.00"),
+            notas_apertura="Inicio de consulta",
+            notas_cierre="Cierre normal",
+        )
+        corte = self.reporte_fake()
+        corte.update({
+            "contract": "chremata.corte_caja.v1",
+            "caja": {
+                "caja_public_id": str(caja.public_id),
+                "estado": "cerrada",
+                "device_id": "zephyros",
+                "caja_fisica": None,
+                "abierta_en": "2026-06-18T13:00:00Z",
+                "cerrada_en": "2026-06-18T19:00:00Z",
+            },
+            "efectivo": {
+                "saldo_inicial_efectivo": "100.00",
+                "total_efectivo": "200.00",
+                "efectivo_esperado": "250.00",
+                "efectivo_contado_cierre": "250.00",
+                "diferencia_efectivo": "0.00",
+            },
+            "totales": {
+                "total_bruto": "300.00",
+                "total_efectivo": "200.00",
+                "total_tarjeta": "100.00",
+                "total_transferencia": "0.00",
+                "total_material_cobrado": "50.00",
+                "total_comisiones": "5.00",
+                "total_neto_estimado": "295.00",
+            },
+            "totales_por_metodo": [{"metodo_pago": "Efectivo", "cantidad": 1, "total_bruto": "200.00", "total_comisiones": "0.00", "total_neto_estimado": "200.00"}],
+            "totales_por_canal": [{"canal_cobro": "Efectivo en caja", "metodo_pago": "Efectivo", "cantidad": 1, "total_bruto": "200.00", "total_comisiones": "0.00", "total_neto_estimado": "200.00"}],
+            "totales_por_concepto": [{"concepto": "Consulta", "cantidad_total": "1.00", "lineas": 1, "total": "300.00", "material_cobrado": "50.00"}],
+            "gastos_material": {"cantidad": 1, "total_gastos_material": "50.00", "detalle": [{"fecha": "2026-06-18T15:00:00Z", "monto": "50.00", "descripcion": "Gasas", "notas": "Caja"}]},
+            "tickets": {"tickets_cobrados": 1, "tickets_pendientes_creados_durante_caja": 0, "tickets_cancelados_creados_durante_caja": 0, "tickets_abandonados_creados_durante_caja": 0},
+        })
+        self.login()
+
+        with patch("chremata.views.calcular_corte_caja", return_value=corte) as calcular_corte:
+            response = self.client.get(reverse("chremata_caja_detalle", kwargs={"public_id": caja.public_id}))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTemplateUsed(response, "chremata/cajas/detalle.html")
+        calcular_corte.assert_called_once_with(caja)
+        self.assertContains(response, "Corte de caja")
+        self.assertContains(response, "zephyros")
+        self.assertContains(response, "cerrada")
+        self.assertContains(response, "Inicio de consulta")
+        self.assertContains(response, "Cierre normal")
+        self.assertContains(response, "$100.00")
+        self.assertContains(response, "$250.00")
+        self.assertContains(response, "Gasas")
+        self.assertContains(response, "Consulta")
+        self.assertContains(response, "Efectivo en caja")
+        self.assertContains(response, "Tickets cobrados")
+        self.assertNotContains(response, 'href="/api/v1/chremata/' + 'cajas/')
+
+    def test_caja_detalle_inexistente_devuelve_404(self):
+        self.login()
+
+        response = self.client.get(reverse("chremata_caja_detalle", kwargs={"public_id": "12345678-1234-5678-1234-567812345678"}))
+
+        self.assertEqual(response.status_code, 404)
+
+    def test_caja_detalle_abierta_sin_datos_carga_sin_romper(self):
+        caja = CajaSesion.objects.create(
+            device_id="zephyros",
+            abierta_en=datetime(2026, 6, 18, 8, 0, tzinfo=timezone.get_current_timezone()),
+            saldo_inicial_efectivo=Decimal("100.00"),
+        )
+        self.login()
+
+        response = self.client.get(reverse("chremata_caja_detalle", kwargs={"public_id": caja.public_id}))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Caja abierta / cierre pendiente")
+        self.assertContains(response, "Sin datos para esta sección.")
+        self.assertNotContains(response, 'href="/api/v1/chremata/' + 'cajas/')

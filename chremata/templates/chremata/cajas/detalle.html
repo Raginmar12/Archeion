@@ -1,0 +1,161 @@
+{% extends "chremata/base.html" %}
+
+{% block title %}{{ titulo }}{% endblock %}
+
+{% block content %}
+<section class="page-heading">
+  <div>
+    <h1>Corte de caja</h1>
+    <p>Caja: <strong>{{ corte.caja.caja_public_id }}</strong></p>
+    <p class="muted">
+      Caja física: {{ corte.caja.caja_fisica.nombre|default:"Sin caja física" }} ·
+      Estado: <span class="status-pill">{{ corte.caja.estado }}</span>
+      {% if corte.caja.device_id %} · Dispositivo: {{ corte.caja.device_id }}{% endif %}
+    </p>
+    <p class="muted">
+      Apertura: {{ corte.caja.abierta_en }} · Cierre: {{ corte.caja.cerrada_en|default:"—" }} ·
+      Generado: {{ corte.generated_at }}
+    </p>
+  </div>
+  <nav class="quick-links" aria-label="Navegación de corte">
+    <a class="button-link" href="{% url 'chremata_dashboard' %}">Dashboard</a>
+    <a class="button-link" href="{% url 'chremata_reporte_diario' %}">Reporte diario</a>
+    <button type="button" onclick="history.back()">Volver</button>
+  </nav>
+</section>
+
+<section class="card-grid" aria-label="Efectivo de caja">
+  <article class="card">
+    <span>Saldo inicial</span>
+    <strong>${{ corte.efectivo.saldo_inicial_efectivo }}</strong>
+  </article>
+  <article class="card">
+    <span>Efectivo esperado</span>
+    <strong>${{ corte.efectivo.efectivo_esperado }}</strong>
+  </article>
+  <article class="card">
+    <span>Efectivo contado</span>
+    <strong>{% if corte.efectivo.efectivo_contado_cierre %}${{ corte.efectivo.efectivo_contado_cierre }}{% else %}—{% endif %}</strong>
+  </article>
+  <article class="card">
+    <span>Diferencia</span>
+    <strong>{% if corte.efectivo.diferencia_efectivo %}${{ corte.efectivo.diferencia_efectivo }}{% else %}—{% endif %}</strong>
+  </article>
+</section>
+
+{% if caja.estado == "abierta" and not caja.efectivo_contado_cierre %}
+  <div class="notice warning">Caja abierta / cierre pendiente.</div>
+{% endif %}
+
+<section class="report-section">
+  <h2>Notas de caja</h2>
+  {% if caja.notas_apertura or caja.notas_cierre %}
+    {% if caja.notas_apertura %}<p><strong>Apertura:</strong> {{ caja.notas_apertura }}</p>{% endif %}
+    {% if caja.notas_cierre %}<p><strong>Cierre:</strong> {{ caja.notas_cierre }}</p>{% endif %}
+  {% else %}
+    <p class="empty">Sin datos para esta sección.</p>
+  {% endif %}
+</section>
+
+<section class="card-grid" aria-label="Totales del corte">
+  <article class="card"><span>Ingresos cobrados</span><strong>${{ corte.totales.total_bruto }}</strong></article>
+  <article class="card"><span>Total efectivo</span><strong>${{ corte.totales.total_efectivo }}</strong></article>
+  <article class="card"><span>Total tarjeta</span><strong>${{ corte.totales.total_tarjeta }}</strong></article>
+  <article class="card"><span>Total transferencia</span><strong>${{ corte.totales.total_transferencia }}</strong></article>
+  <article class="card"><span>Material cobrado</span><strong>${{ corte.totales.total_material_cobrado }}</strong></article>
+  <article class="card"><span>Comisiones</span><strong>${{ corte.totales.total_comisiones }}</strong></article>
+  <article class="card"><span>Neto después de comisiones</span><strong>${{ corte.totales.total_neto_estimado }}</strong></article>
+  <article class="card"><span>Gastos material de caja</span><strong>${{ corte.gastos_material.total_gastos_material }}</strong></article>
+</section>
+
+<section class="report-section">
+  <h2>Totales por método</h2>
+  {% if corte.totales_por_metodo %}
+    <div class="table-wrapper">
+      <table>
+        <thead><tr><th>Método</th><th>Cantidad</th><th>Ingresos cobrados</th><th>Comisiones</th><th>Neto después de comisiones</th></tr></thead>
+        <tbody>
+          {% for item in corte.totales_por_metodo %}
+            <tr><td>{{ item.metodo_pago }}</td><td>{{ item.cantidad }}</td><td>${{ item.total_bruto }}</td><td>${{ item.total_comisiones }}</td><td>${{ item.total_neto_estimado }}</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% else %}
+    <p class="empty">Sin datos para esta sección.</p>
+  {% endif %}
+</section>
+
+<section class="report-section">
+  <h2>Totales por canal</h2>
+  {% if corte.totales_por_canal %}
+    <div class="table-wrapper">
+      <table>
+        <thead><tr><th>Canal</th><th>Método</th><th>Cantidad</th><th>Ingresos cobrados</th><th>Comisiones</th><th>Neto después de comisiones</th></tr></thead>
+        <tbody>
+          {% for item in corte.totales_por_canal %}
+            <tr><td>{{ item.canal_cobro }}</td><td>{{ item.metodo_pago }}</td><td>{{ item.cantidad }}</td><td>${{ item.total_bruto }}</td><td>${{ item.total_comisiones }}</td><td>${{ item.total_neto_estimado }}</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% else %}
+    <p class="empty">Sin datos para esta sección.</p>
+  {% endif %}
+</section>
+
+<section class="report-section">
+  <h2>Totales por concepto</h2>
+  {% if corte.totales_por_concepto %}
+    <div class="table-wrapper">
+      <table>
+        <thead><tr><th>Concepto</th><th>Cantidad total</th><th>Líneas</th><th>Total</th><th>Material cobrado</th></tr></thead>
+        <tbody>
+          {% for item in corte.totales_por_concepto %}
+            <tr><td>{{ item.concepto }}</td><td>{{ item.cantidad_total }}</td><td>{{ item.lineas }}</td><td>${{ item.total }}</td><td>${{ item.material_cobrado }}</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% else %}
+    <p class="empty">Sin datos para esta sección.</p>
+  {% endif %}
+</section>
+
+<section class="report-section">
+  <h2>Gastos de material</h2>
+  {% if corte.gastos_material.detalle %}
+    <div class="table-wrapper">
+      <table>
+        <thead><tr><th>Fecha</th><th>Monto</th><th>Descripción</th><th>Notas</th></tr></thead>
+        <tbody>
+          {% for gasto in corte.gastos_material.detalle %}
+            <tr><td>{{ gasto.fecha }}</td><td>${{ gasto.monto }}</td><td>{{ gasto.descripcion|default:"—" }}</td><td>{{ gasto.notas|default:"—" }}</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% else %}
+    <p class="empty">Sin datos para esta sección.</p>
+  {% endif %}
+</section>
+
+<section class="report-section">
+  <h2>Tickets incluidos</h2>
+  {% if corte.tickets.tickets_cobrados or corte.tickets.tickets_pendientes_creados_durante_caja or corte.tickets.tickets_cancelados_creados_durante_caja or corte.tickets.tickets_abandonados_creados_durante_caja %}
+    <div class="table-wrapper">
+      <table>
+        <thead><tr><th>Métrica</th><th>Cantidad</th></tr></thead>
+        <tbody>
+          <tr><td>Tickets cobrados</td><td>{{ corte.tickets.tickets_cobrados }}</td></tr>
+          <tr><td>Pendientes creados durante caja</td><td>{{ corte.tickets.tickets_pendientes_creados_durante_caja }}</td></tr>
+          <tr><td>Cancelados creados durante caja</td><td>{{ corte.tickets.tickets_cancelados_creados_durante_caja }}</td></tr>
+          <tr><td>Abandonados creados durante caja</td><td>{{ corte.tickets.tickets_abandonados_creados_durante_caja }}</td></tr>
+        </tbody>
+      </table>
+    </div>
+  {% else %}
+    <p class="empty">Sin datos para esta sección.</p>
+  {% endif %}
+</section>
+{% endblock %}

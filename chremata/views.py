@@ -1,7 +1,7 @@
 from datetime import date, timedelta
 
 from django.contrib.auth.decorators import login_required
-from django.shortcuts import render
+from django.shortcuts import get_object_or_404, render
 from django.utils import timezone
 
 from .models import CajaSesion, GastoMaterial, TicketPago
@@ -12,6 +12,7 @@ from .reports import (
     construir_periodo_mes,
     construir_periodo_semana,
 )
+from .services import calcular_corte_caja
 from .views_api import _material_pool_snapshot
 
 
@@ -216,3 +217,19 @@ def reporte_anio(request):
         hoy_anio=hoy.year,
     )
     return render(request, "chremata/reportes/periodo.html", contexto)
+
+
+
+@login_required
+def caja_detalle(request, public_id):
+    caja = get_object_or_404(
+        CajaSesion.objects.select_related("caja_fisica"),
+        public_id=public_id,
+    )
+    corte = calcular_corte_caja(caja)
+    contexto = {
+        "titulo": "Corte de caja",
+        "caja": caja,
+        "corte": corte,
+    }
+    return render(request, "chremata/cajas/detalle.html", contexto)

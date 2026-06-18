@@ -142,6 +142,11 @@ También están disponibles reportes HTML de calendario en `/chremata/reportes/s
 `/chremata/reportes/mes/` y `/chremata/reportes/anio/`. Todos requieren login de
 Django y reutilizan el mismo servicio de reportes por periodo que el reporte diario.
 
+El corte HTML de una sesión de caja está en `/chremata/cajas/<public_id>/`. Requiere
+login, puede consultarse desde teléfono en la red local, usa `calcular_corte_caja()`
+y es distinto del endpoint API `/api/v1/chremata/cajas/<caja_public_id>/corte/` que
+consume Zephyros.
+
 ## Dashboard principal de Chremata
 
 La portada operativa de Chremata está en:
@@ -159,8 +164,9 @@ mantenimiento detallado de catálogos y revisión de registros. Tampoco reemplaz
 corte de caja, porque el corte pertenece a una `CajaSesion` operativa y puede cruzar
 medianoche. El reporte diario detallado sigue disponible en `/chremata/reportes/dia/`.
 
-El dashboard enlaza a los reportes HTML diario, semanal, mensual y anual. No existe
-todavía una vista HTML de detalle de caja; el corte oficial sigue consultándose por API.
+El dashboard enlaza a los reportes HTML diario, semanal, mensual y anual. Si hay una
+caja abierta o una última caja, también enlaza a su corte HTML en `/chremata/cajas/<public_id>/`.
+El corte HTML es una vista humana; el endpoint API de corte sigue existiendo para integración.
 
 ### Lectura de métricas monetarias
 

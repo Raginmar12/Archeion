@@ -126,10 +126,13 @@ Las vistas HTML de Chremata requieren login de Django:
 - `/chremata/reportes/semana/`: reporte semanal ISO, de lunes a lunes.
 - `/chremata/reportes/mes/`: reporte mensual.
 - `/chremata/reportes/anio/`: reporte anual.
+- `/chremata/cajas/<public_id>/`: corte HTML de una sesión de caja.
 
 Estos reportes son calendarios y no reemplazan el corte de caja. Una `CajaSesion`
 puede cruzar medianoche y se muestra como complemento informativo cuando intersecta
-el periodo; el corte operativo de caja sigue siendo independiente.
+el periodo; el corte operativo de caja sigue siendo independiente. La vista HTML de
+caja requiere login, usa el servicio oficial `calcular_corte_caja()` y es distinta
+del endpoint API usado por Zephyros.
 
 Nomenclatura contable visible:
 

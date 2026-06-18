@@ -78,7 +78,7 @@
           <div><dt>Diferencia</dt><dd>${{ caja_resumen.diferencia_efectivo }}</dd></div>
         {% endif %}
       </dl>
-      <p class="muted">Detalle HTML de caja pendiente.</p>
+      <p><a href="{% url 'chremata_caja_detalle' caja_resumen.public_id %}">Ver corte</a></p>
     {% else %}
       <p class="empty">Sin cajas registradas.</p>
     {% endif %}

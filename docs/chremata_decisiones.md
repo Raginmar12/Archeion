@@ -46,7 +46,9 @@ para evitar solapamientos entre periodos consecutivos.
 El corte de caja sigue siendo un concepto operativo distinto: pertenece a una
 `CajaSesion`, puede cruzar medianoche y no define los límites de un reporte diario,
 semanal, mensual o anual. En los reportes calendario, las cajas que intersectan el
-periodo se muestran solo como complemento informativo.
+periodo se muestran solo como complemento informativo y enlazan a la vista HTML
+`/chremata/cajas/<public_id>/`. Esa vista requiere login, usa `calcular_corte_caja()`
+y no reemplaza el endpoint API de corte usado por Zephyros.
 
 Para reportes de periodo, `Ingreso` es la fuente oficial de totales monetarios:
 importe bruto, procedimiento, material cobrado, material recuperado, material
