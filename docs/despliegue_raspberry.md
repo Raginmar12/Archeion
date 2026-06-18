@@ -46,6 +46,16 @@ Pendiente: definir variables finales requeridas para el servicio permanente.
 ```bash
 python manage.py migrate
 ```
+## Recolectar archivos estáticos
+
+Después de instalar dependencias y aplicar migraciones, recolectar los archivos estáticos para que WhiteNoise pueda servir el CSS/JS de Django Admin cuando Archeion corre con Gunicorn/systemd:
+
+```bash
+python manage.py collectstatic --noinput
+```
+
+Este comando genera el directorio `staticfiles/` local, que está ignorado por Git y no debe commitearse. Ejecutarlo antes de iniciar o reiniciar el servicio.
+
 
 ## Ejecutar seed inicial
 
@@ -87,6 +97,14 @@ gunicorn archeion.wsgi:application --bind 0.0.0.0:8000
 
 Pendiente: definir configuración definitiva de workers, usuario y logs.
 
+
+
+Cuando el servicio `systemd` ya exista, reiniciarlo después de actualizar código, instalar dependencias, migrar y ejecutar `collectstatic`:
+
+```bash
+sudo systemctl restart archeion
+```
+
 ## Preparar futuro `systemd`
 
 Pendiente de formalizar:
@@ -112,3 +130,12 @@ Pendiente de formalizar:
 Cuando Archeion corra en Raspberry, el flujo operativo no cambia: Zephyros abre caja antes de cobrar, sincroniza operaciones, cierra caja al final y consulta el corte oficial en Archeion con `GET /api/v1/chremata/cajas/<caja_public_id>/corte/`.
 
 La Raspberry hospeda la autoridad de datos; el corte local de Zephyros sigue siendo auxiliar. Respaldar la base antes de mantenimientos importantes, especialmente después de sesiones con caja cerrada y `resumen_snapshot` persistido.
+
+## Troubleshooting de archivos estáticos
+
+Si el Django Admin carga sin formato, sin CSS o sin JavaScript, revisar:
+
+- Que `whitenoise` esté instalado en el entorno virtual activo.
+- Que `python manage.py collectstatic --noinput` se haya ejecutado después de instalar dependencias.
+- Que el servicio se haya reiniciado con `sudo systemctl restart archeion`.
+- Que exista el directorio configurado como `STATIC_ROOT` (`staticfiles/`).
