@@ -316,7 +316,8 @@ def _serializar_cajas(inicio, fin):
                 else None,
                 "diferencia_efectivo": _money(caja.diferencia_efectivo),
                 "total_gastos_material_caja": _money(total_gastos_material_caja),
-                "corte_url": f"/chremata/cajas/{caja.public_id}/",
+                # Vista HTML de corte pendiente para R5.
+                "corte_url": None,
             }
         )
     return {

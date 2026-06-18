@@ -336,6 +336,9 @@ class ReporteChremataPeriodoTests(TestCase):
             reporte_18["cajas"]["intersectan_periodo"][0]["caja_public_id"],
             str(caja.public_id),
         )
+        self.assertIsNone(
+            reporte_18["cajas"]["intersectan_periodo"][0]["corte_url"],
+        )
 
     def test_ticket_pendiente_cuenta_solo_como_actividad(self):
         self.crear_ticket(fecha=self.dt(2026, 6, 18, 14, 0))
@@ -525,6 +528,30 @@ class ReporteDiarioViewTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "La fecha indicada no tiene formato válido")
+
+    def test_vista_no_muestra_link_roto_a_detalle_html_de_caja(self):
+        CajaSesion.objects.create(
+            device_id="zephyros",
+            abierta_en=datetime(
+                2026,
+                6,
+                18,
+                8,
+                0,
+                tzinfo=timezone.get_current_timezone(),
+            ),
+            saldo_inicial_efectivo=Decimal("100.00"),
+        )
+        self.login()
+
+        response = self.client.get(
+            reverse("chremata_reporte_diario"),
+            {"fecha": "2026-06-18"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertNotContains(response, "/chremata/cajas/")
+        self.assertNotContains(response, "/api/v1/chremata/cajas/")
 
     def test_vista_muestra_datos_basicos_del_reporte(self):
         metodo = MetodoPago.objects.create(nombre="Efectivo")
