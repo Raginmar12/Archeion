@@ -50,7 +50,7 @@ La caja pertenece al cobro, no al ticket pendiente. Un ticket pendiente puede ex
 
 El corte local de Zephyros es auxiliar para operar offline. El corte oficial vive en Archeion y se consulta por `GET /api/v1/chremata/cajas/<caja_public_id>/corte/`.
 
-Los gastos de material asociados a una caja se reportan aparte en el corte y no reducen el efectivo esperado, que se calcula como saldo inicial de efectivo más cobros en efectivo.
+Los gastos de material asociados a una caja se reportan aparte en el corte y reducen el efectivo esperado, porque un `GastoMaterial` con `CajaSesion` representa salida física de efectivo desde esa caja. La fórmula del corte es `efectivo_esperado = saldo_inicial_efectivo + total_efectivo - total_gastos_material_asociados_a_la_CajaSesion`. Un `GastoMaterial` sin `CajaSesion` sigue afectando el material pool global, pero no el corte de una caja específica. La lógica del material pool global no cambia.
 
 ## Impresión térmica
 

@@ -264,7 +264,7 @@ La respuesta usa el contrato `chremata.corte_caja.v1` e incluye estas secciones 
 
 Reglas importantes:
 
-- `efectivo_esperado = saldo_inicial_efectivo + total_efectivo`.
-- El gasto de material se reporta aparte y no resta el `efectivo_esperado`.
+- `efectivo_esperado = saldo_inicial_efectivo + total_efectivo - total_gastos_material_asociados_a_la_CajaSesion`.
+- El `GastoMaterial` asociado a la `CajaSesion` se reporta aparte y también reduce el `efectivo_esperado` porque representa salida física de efectivo desde esa caja. Un `GastoMaterial` sin `CajaSesion` sigue afectando el material pool global, pero no el corte de una caja específica.
 - `cerrar_caja` persiste el corte calculado en `resumen_snapshot`.
 - El corte puede cruzar medianoche porque depende de `CajaSesion.abierta_en` y `CajaSesion.cerrada_en`, no de un día calendario.

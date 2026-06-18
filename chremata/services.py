@@ -190,7 +190,7 @@ def calcular_corte_caja(caja_sesion):
     }
 
     efectivo_esperado = (
-        caja_sesion.saldo_inicial_efectivo + total_efectivo
+        caja_sesion.saldo_inicial_efectivo + total_efectivo - total_gastos_material
     ).quantize(PESOS_DECIMALES)
     diferencia_efectivo = None
     if caja_sesion.efectivo_contado_cierre is not None:

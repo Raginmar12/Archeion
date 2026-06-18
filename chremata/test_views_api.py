@@ -1,9 +1,12 @@
 import json
 from datetime import datetime, timezone as datetime_timezone
 from decimal import Decimal
+from io import StringIO
 from unittest.mock import patch
 from uuid import UUID, uuid4
 
+from django.core.management import call_command
+from django.core.management.base import CommandError
 from django.test import TestCase, override_settings
 from django.urls import reverse
 
@@ -967,6 +970,12 @@ class ChremataOperationsApiTests(TestCase):
             abierta_en=datetime(2026, 6, 18, 4, 30, tzinfo=datetime_timezone.utc),
             saldo_inicial_efectivo=Decimal("500.00"),
         )
+        GastoMaterial.objects.create(
+            caja_sesion=caja,
+            fecha=datetime(2026, 6, 18, 6, 0, tzinfo=datetime_timezone.utc),
+            monto=Decimal("120.00"),
+            descripcion="Gasas",
+        )
 
         response = self.post_operation(self.payload_cerrar_caja(caja))
 
@@ -979,12 +988,20 @@ class ChremataOperationsApiTests(TestCase):
         self.assertEqual(caja.total_material_cobrado, Decimal("0.00"))
         self.assertEqual(caja.total_comisiones, Decimal("0.00"))
         self.assertEqual(caja.total_neto_estimado, Decimal("0.00"))
-        self.assertEqual(caja.efectivo_esperado, Decimal("500.00"))
-        self.assertEqual(caja.diferencia_efectivo, Decimal("750.00"))
+        self.assertEqual(caja.efectivo_esperado, Decimal("380.00"))
+        self.assertEqual(caja.diferencia_efectivo, Decimal("870.00"))
         self.assertEqual(caja.resumen_snapshot["contract"], "chremata.corte_caja.v1")
         self.assertEqual(
+            caja.resumen_snapshot["efectivo"]["efectivo_esperado"],
+            "380.00",
+        )
+        self.assertEqual(
             caja.resumen_snapshot["efectivo"]["diferencia_efectivo"],
-            "750.00",
+            "870.00",
+        )
+        self.assertEqual(
+            caja.resumen_snapshot["gastos_material"]["total_gastos_material"],
+            "120.00",
         )
 
     def test_cerrar_caja_falla_si_caja_no_existe(self):
@@ -2516,7 +2533,17 @@ class CorteCajaApiTests(TestCase):
         self.assertEqual(conceptos["Curación"]["material_cobrado"], "25.00")
         self.assertNotIn("Resumen", conceptos)
 
-    def test_gastos_material_aparecen_y_no_restan_efectivo(self):
+    def test_gastos_material_asociados_restan_efectivo_esperado(self):
+        self.cobrar_en_caja(
+            self.canal_efectivo,
+            [
+                {
+                    "concepto": self.concepto_consulta,
+                    "cantidad": Decimal("1.00"),
+                    "monto_unitario": Decimal("200.00"),
+                }
+            ],
+        )
         GastoMaterial.objects.create(
             caja_sesion=self.caja,
             fecha=datetime(2026, 6, 18, 6, 0, tzinfo=datetime_timezone.utc),
@@ -2528,8 +2555,83 @@ class CorteCajaApiTests(TestCase):
 
         self.assertEqual(corte["gastos_material"]["cantidad"], 1)
         self.assertEqual(corte["gastos_material"]["total_gastos_material"], "120.00")
-        self.assertEqual(corte["efectivo"]["efectivo_esperado"], "500.00")
+        self.assertEqual(corte["totales"]["total_efectivo"], "200.00")
+        self.assertEqual(corte["efectivo"]["efectivo_esperado"], "580.00")
         self.assertEqual(Ingreso.calcular_pool_material_actual(), Decimal("120.00"))
+
+    def test_diferencia_efectivo_usa_gastos_material_asociados(self):
+        self.cobrar_en_caja(
+            self.canal_efectivo,
+            [
+                {
+                    "concepto": self.concepto_consulta,
+                    "cantidad": Decimal("1.00"),
+                    "monto_unitario": Decimal("200.00"),
+                }
+            ],
+        )
+        GastoMaterial.objects.create(
+            caja_sesion=self.caja,
+            fecha=datetime(2026, 6, 18, 6, 0, tzinfo=datetime_timezone.utc),
+            monto=Decimal("120.00"),
+            descripcion="Gasas",
+        )
+        self.caja.estado = CajaSesion.ESTADO_CERRADA
+        self.caja.cerrada_en = datetime(2026, 6, 18, 7, 0, tzinfo=datetime_timezone.utc)
+        self.caja.efectivo_contado_cierre = Decimal("580.00")
+        self.caja.save()
+
+        corte = calcular_corte_caja(self.caja)
+
+        self.assertEqual(corte["efectivo"]["efectivo_esperado"], "580.00")
+        self.assertEqual(corte["efectivo"]["diferencia_efectivo"], "0.00")
+
+    def test_gastos_material_sin_caja_y_de_otra_caja_no_afectan(self):
+        otra_caja = CajaSesion.objects.create(
+            device_id="zephyros-secundario",
+            abierta_en=datetime(2026, 6, 18, 4, 30, tzinfo=datetime_timezone.utc),
+            saldo_inicial_efectivo=Decimal("0.00"),
+        )
+        GastoMaterial.objects.create(
+            fecha=datetime(2026, 6, 18, 6, 0, tzinfo=datetime_timezone.utc),
+            monto=Decimal("120.00"),
+            descripcion="Sin caja",
+        )
+        GastoMaterial.objects.create(
+            caja_sesion=otra_caja,
+            fecha=datetime(2026, 6, 18, 6, 5, tzinfo=datetime_timezone.utc),
+            monto=Decimal("80.00"),
+            descripcion="Otra caja",
+        )
+
+        corte = calcular_corte_caja(self.caja)
+
+        self.assertEqual(corte["gastos_material"]["cantidad"], 0)
+        self.assertEqual(corte["gastos_material"]["total_gastos_material"], "0.00")
+        self.assertEqual(corte["efectivo"]["efectivo_esperado"], "500.00")
+        self.assertEqual(Ingreso.calcular_pool_material_actual(), Decimal("200.00"))
+
+    def test_tarjeta_y_transferencia_no_afectan_efectivo_esperado(self):
+        linea = {
+            "concepto": self.concepto_consulta,
+            "cantidad": Decimal("1.00"),
+            "monto_unitario": Decimal("100.00"),
+        }
+        self.cobrar_en_caja(self.canal_spei, [linea])
+        self.cobrar_en_caja(self.canal_tap, [linea])
+        GastoMaterial.objects.create(
+            caja_sesion=self.caja,
+            fecha=datetime(2026, 6, 18, 6, 0, tzinfo=datetime_timezone.utc),
+            monto=Decimal("50.00"),
+            descripcion="Gasas",
+        )
+
+        corte = calcular_corte_caja(self.caja)
+
+        self.assertEqual(corte["totales"]["total_efectivo"], "0.00")
+        self.assertEqual(corte["totales"]["total_transferencia"], "100.00")
+        self.assertEqual(corte["totales"]["total_tarjeta"], "100.00")
+        self.assertEqual(corte["efectivo"]["efectivo_esperado"], "450.00")
 
     def test_cerrar_caja_persiste_snapshot_real_y_diferencia(self):
         self.cobrar_en_caja(
@@ -2541,6 +2643,12 @@ class CorteCajaApiTests(TestCase):
                     "monto_unitario": Decimal("100.00"),
                 }
             ],
+        )
+        GastoMaterial.objects.create(
+            caja_sesion=self.caja,
+            fecha=datetime(2026, 6, 18, 6, 0, tzinfo=datetime_timezone.utc),
+            monto=Decimal("20.00"),
+            descripcion="Gasas",
         )
         payload = {
             "operation": "cerrar_caja",
@@ -2563,10 +2671,161 @@ class CorteCajaApiTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.caja.refresh_from_db()
         self.assertEqual(self.caja.total_efectivo, Decimal("100.00"))
-        self.assertEqual(self.caja.efectivo_esperado, Decimal("600.00"))
-        self.assertEqual(self.caja.diferencia_efectivo, Decimal("-10.00"))
+        self.assertEqual(self.caja.efectivo_esperado, Decimal("580.00"))
+        self.assertEqual(self.caja.diferencia_efectivo, Decimal("10.00"))
         self.assertEqual(self.caja.resumen_snapshot["contract"], "chremata.corte_caja.v1")
         self.assertEqual(self.caja.resumen_snapshot["totales"]["total_bruto"], "100.00")
+        self.assertEqual(
+            self.caja.resumen_snapshot["efectivo"]["efectivo_esperado"],
+            "580.00",
+        )
+        self.assertEqual(
+            self.caja.resumen_snapshot["efectivo"]["diferencia_efectivo"],
+            "10.00",
+        )
+        self.assertEqual(
+            self.caja.resumen_snapshot["gastos_material"]["total_gastos_material"],
+            "20.00",
+        )
+
+    def preparar_caja_cerrada_con_snapshot_viejo(self):
+        self.cobrar_en_caja(
+            self.canal_efectivo,
+            [
+                {
+                    "concepto": self.concepto_consulta,
+                    "cantidad": Decimal("1.00"),
+                    "monto_unitario": Decimal("200.00"),
+                }
+            ],
+        )
+        GastoMaterial.objects.create(
+            caja_sesion=self.caja,
+            fecha=datetime(2026, 6, 18, 6, 0, tzinfo=datetime_timezone.utc),
+            monto=Decimal("120.00"),
+            descripcion="Gasas",
+        )
+        self.caja.estado = CajaSesion.ESTADO_CERRADA
+        self.caja.cerrada_en = datetime(2026, 6, 18, 7, 0, tzinfo=datetime_timezone.utc)
+        self.caja.efectivo_contado_cierre = Decimal("580.00")
+        self.caja.efectivo_esperado = Decimal("700.00")
+        self.caja.diferencia_efectivo = Decimal("-120.00")
+        self.caja.resumen_snapshot = {
+            "contract": "chremata.corte_caja.v1",
+            "efectivo": {
+                "efectivo_esperado": "700.00",
+                "diferencia_efectivo": "-120.00",
+            },
+        }
+        self.caja.save()
+        return self.caja
+
+    def test_recalcular_cortes_caja_dry_run_no_modifica(self):
+        caja = self.preparar_caja_cerrada_con_snapshot_viejo()
+        salida = StringIO()
+
+        call_command("recalcular_cortes_caja", "--dry-run", stdout=salida)
+
+        caja.refresh_from_db()
+        self.assertIn("DRY-RUN", salida.getvalue())
+        self.assertEqual(caja.efectivo_esperado, Decimal("700.00"))
+        self.assertEqual(caja.diferencia_efectivo, Decimal("-120.00"))
+        self.assertEqual(
+            caja.resumen_snapshot["efectivo"]["efectivo_esperado"],
+            "700.00",
+        )
+
+    def test_recalcular_cortes_caja_actualiza_caja_cerrada(self):
+        caja = self.preparar_caja_cerrada_con_snapshot_viejo()
+        salida = StringIO()
+
+        call_command("recalcular_cortes_caja", stdout=salida)
+
+        caja.refresh_from_db()
+        self.assertIn(str(caja.public_id), salida.getvalue())
+        self.assertEqual(caja.efectivo_esperado, Decimal("580.00"))
+        self.assertEqual(caja.diferencia_efectivo, Decimal("0.00"))
+        self.assertEqual(
+            caja.resumen_snapshot["efectivo"]["efectivo_esperado"],
+            "580.00",
+        )
+        self.assertEqual(
+            caja.resumen_snapshot["gastos_material"]["total_gastos_material"],
+            "120.00",
+        )
+
+    def test_recalcular_cortes_caja_caja_public_id_limita_alcance(self):
+        caja = self.preparar_caja_cerrada_con_snapshot_viejo()
+        otra_caja = CajaSesion.objects.create(
+            device_id="zephyros-secundario",
+            estado=CajaSesion.ESTADO_CERRADA,
+            abierta_en=datetime(2026, 6, 18, 8, 0, tzinfo=datetime_timezone.utc),
+            cerrada_en=datetime(2026, 6, 18, 9, 0, tzinfo=datetime_timezone.utc),
+            saldo_inicial_efectivo=Decimal("100.00"),
+            efectivo_contado_cierre=Decimal("100.00"),
+            efectivo_esperado=Decimal("999.00"),
+            diferencia_efectivo=Decimal("-899.00"),
+            resumen_snapshot={
+                "efectivo": {
+                    "efectivo_esperado": "999.00",
+                    "diferencia_efectivo": "-899.00",
+                }
+            },
+        )
+
+        call_command(
+            "recalcular_cortes_caja",
+            "--caja-public-id",
+            str(caja.public_id),
+            stdout=StringIO(),
+        )
+
+        caja.refresh_from_db()
+        otra_caja.refresh_from_db()
+        self.assertEqual(caja.efectivo_esperado, Decimal("580.00"))
+        self.assertEqual(otra_caja.efectivo_esperado, Decimal("999.00"))
+        self.assertEqual(otra_caja.diferencia_efectivo, Decimal("-899.00"))
+
+    def test_recalcular_cortes_caja_no_modifica_movimientos_y_es_idempotente(self):
+        caja = self.preparar_caja_cerrada_con_snapshot_viejo()
+        conteos_antes = {
+            "tickets": Ticket.objects.count(),
+            "pagos": TicketPago.objects.count(),
+            "ingresos": Ingreso.objects.count(),
+            "gastos": GastoMaterial.objects.count(),
+            "operaciones": OperacionDispositivoChremata.objects.count(),
+        }
+
+        call_command("recalcular_cortes_caja", stdout=StringIO())
+        caja.refresh_from_db()
+        esperado = caja.efectivo_esperado
+        diferencia = caja.diferencia_efectivo
+        snapshot = caja.resumen_snapshot
+        call_command("recalcular_cortes_caja", stdout=StringIO())
+        caja.refresh_from_db()
+
+        self.assertEqual(
+            conteos_antes,
+            {
+                "tickets": Ticket.objects.count(),
+                "pagos": TicketPago.objects.count(),
+                "ingresos": Ingreso.objects.count(),
+                "gastos": GastoMaterial.objects.count(),
+                "operaciones": OperacionDispositivoChremata.objects.count(),
+            },
+        )
+        self.assertEqual(caja.efectivo_esperado, esperado)
+        self.assertEqual(caja.diferencia_efectivo, diferencia)
+        self.assertEqual(caja.resumen_snapshot, snapshot)
+
+    def test_recalcular_cortes_caja_caja_public_id_inexistente_falla(self):
+        with self.assertRaisesMessage(CommandError, "No existe una CajaSesion cerrada"):
+            call_command(
+                "recalcular_cortes_caja",
+                "--caja-public-id",
+                str(uuid4()),
+                stdout=StringIO(),
+            )
 
     def test_endpoint_requiere_token(self):
         response = self.get_corte(token="")
