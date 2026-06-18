@@ -10,6 +10,7 @@
     <p class="muted">El corte de caja es operativo y puede cruzar medianoche; no reemplaza el reporte calendario.</p>
     <p class="muted">
       Caja física: {{ corte.caja.caja_fisica.nombre|default:"Sin caja física" }} ·
+      Origen de jornada: {{ corte.caja.origen_ingreso.nombre|default:"Sin origen de jornada" }} ·
       Estado: <span class="status-pill">{{ corte.caja.estado }}</span>
       {% if corte.caja.device_id %} · Dispositivo: {{ corte.caja.device_id }}{% endif %}
     </p>

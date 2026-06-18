@@ -249,6 +249,30 @@ class ReporteChremataPeriodoTests(TestCase):
         self.assertEqual(por_concepto["Curación"]["total"], "250.00")
         self.assertNotIn("Cobro de ticket", por_concepto)
 
+    def test_por_origen_usa_ingreso_no_origen_de_caja(self):
+        origen_caja = OrigenIngreso.objects.create(nombre="Similares")
+        caja = CajaSesion.objects.create(
+            device_id="zephyros",
+            origen_ingreso=origen_caja,
+            abierta_en=self.dt(2026, 6, 18, 8, 0),
+            saldo_inicial_efectivo=Decimal("500.00"),
+        )
+        self.cobrar(
+            canal=self.canal_efectivo,
+            fecha=self.dt(2026, 6, 18, 10, 0),
+            lineas=[{"monto_unitario": Decimal("100.00")}],
+            caja_sesion=caja,
+        )
+
+        reporte = self.calcular_dia()
+
+        self.assertEqual(reporte["por_origen"][0]["origen"], "Consultorio")
+        self.assertEqual(reporte["por_origen"][0]["total_bruto"], "100.00")
+        self.assertEqual(
+            reporte["cajas"]["intersectan_periodo"][0]["origen_ingreso"]["nombre"],
+            "Similares",
+        )
+
     def test_material_gastos_con_y_sin_caja_y_balance_del_periodo(self):
         caja = CajaSesion.objects.create(
             device_id="zephyros",
@@ -383,6 +407,7 @@ class ReporteChremataPeriodoTests(TestCase):
     def test_caja_cruza_medianoche_intersecta_dos_reportes_sin_definir_ingresos(self):
         caja = CajaSesion.objects.create(
             device_id="zephyros",
+            origen_ingreso=self.origen,
             estado=CajaSesion.ESTADO_CERRADA,
             abierta_en=self.dt(2026, 6, 18, 23, 30),
             cerrada_en=self.dt(2026, 6, 19, 1, 30),
@@ -409,6 +434,10 @@ class ReporteChremataPeriodoTests(TestCase):
         )
         self.assertIsNone(
             reporte_18["cajas"]["intersectan_periodo"][0]["corte_url"],
+        )
+        self.assertEqual(
+            reporte_18["cajas"]["intersectan_periodo"][0]["origen_ingreso"]["nombre"],
+            "Consultorio",
         )
 
     def test_ticket_pendiente_cuenta_solo_como_actividad(self):
@@ -779,8 +808,10 @@ class ReporteDiarioViewTests(TestCase):
         self.assertContains(response, 'href="?fecha=2026-06-19"')
 
     def test_vista_muestra_link_a_detalle_html_de_caja(self):
+        origen = OrigenIngreso.objects.create(nombre="Similares")
         CajaSesion.objects.create(
             device_id="zephyros",
+            origen_ingreso=origen,
             abierta_en=datetime(
                 2026,
                 6,
@@ -799,6 +830,8 @@ class ReporteDiarioViewTests(TestCase):
         )
 
         self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Origen jornada")
+        self.assertContains(response, "Similares")
         self.assertContains(response, "Ver corte")
         self.assertContains(response, "/chremata/cajas/")
         self.assertNotContains(response, 'href="/api/v1/chremata/' + 'cajas/')
@@ -988,6 +1021,10 @@ class ReporteDiarioViewTests(TestCase):
                 "estado": "cerrada",
                 "device_id": "zephyros",
                 "caja_fisica": None,
+                "origen_ingreso": {
+                    "public_id": "12345678-1234-5678-1234-567812345678",
+                    "nombre": "Similares",
+                },
                 "abierta_en": "2026-06-18T13:00:00Z",
                 "cerrada_en": "2026-06-18T19:00:00Z",
             },
@@ -1024,6 +1061,8 @@ class ReporteDiarioViewTests(TestCase):
         self.assertContains(response, "Corte de caja")
         self.assertContains(response, "zephyros")
         self.assertContains(response, "cerrada")
+        self.assertContains(response, "Origen de jornada")
+        self.assertContains(response, "Similares")
         self.assertContains(response, "Inicio de consulta")
         self.assertContains(response, "Cierre normal")
         self.assertContains(response, "$100.00")
@@ -1057,5 +1096,6 @@ class ReporteDiarioViewTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Caja abierta / cierre pendiente")
+        self.assertContains(response, "Sin origen de jornada")
         self.assertContains(response, "Sin notas registradas.")
         self.assertNotContains(response, 'href="/api/v1/chremata/' + 'cajas/')

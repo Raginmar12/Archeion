@@ -24,6 +24,7 @@ Confirmado actualmente:
 - Chremata usa `operation` + `operation_contract` para operaciones sincronizadas.
 - El flujo oficial de caja usa `CajaFisica` como caja real con llave y `CajaSesion` como apertura/cierre operativa.
 - `caja_public_id` identifica una `CajaSesion`; `caja_fisica_public_id` identifica una `CajaFisica`.
+- `CajaSesion.origen_ingreso` es un default/contexto opcional de jornada; no reemplaza el origen histórico guardado en `Ticket.origen` ni en `Ingreso.origen`.
 - El corte de caja oficial vive en Archeion y se consulta por sesión; no reemplaza el reporte diario y puede cruzar medianoche.
 - `entries_v2.jsonl` es JSONL append-only.
 - `sync_state.json` es JSON normal y mutable.
@@ -198,10 +199,11 @@ Operaciones Chremata vigentes:
 
 ## Flujo oficial de caja Chremata
 
-1. Antes de consulta, Zephyros abre una caja con `abrir_caja`, generando una `CajaSesion` asociada opcionalmente a una `CajaFisica`.
-2. Durante consulta, se pueden crear tickets pendientes sin caja; cobrar un ticket en Zephyros requiere caja abierta y debe enviar `caja_public_id`.
+1. Antes de consulta, Zephyros abre una caja con `abrir_caja`, generando una `CajaSesion` asociada opcionalmente a una `CajaFisica` y a un `origen_ingreso` por defecto de jornada.
+2. Durante consulta, se pueden crear tickets pendientes sin caja; cobrar un ticket en Zephyros requiere caja abierta y debe enviar `caja_public_id`. Zephyros actualizado debe guardar el origen de caja en `caja_state.json` y copiarlo a `crear_ticket` como `ticket.origen_ingreso_public_id`.
 3. Los gastos de material capturados durante la sesión pueden enviar el mismo `caja_public_id`; se reportan aparte en el corte y, cuando están asociados a la `CajaSesion`, representan salida física de efectivo y reducen el efectivo esperado. Los gastos sin `CajaSesion` siguen afectando el material pool global, pero no el corte de una caja específica.
 4. Al final, Zephyros cierra la caja con `cerrar_caja`, enviando el efectivo contado. Archeion calcula y guarda el `resumen_snapshot`.
 5. Después de sincronizar, comparar el corte local auxiliar de Zephyros contra `GET /api/v1/chremata/cajas/<caja_public_id>/corte/`, que es la autoridad.
 
 El corte oficial incluye `caja`, `efectivo`, `totales`, `totales_por_metodo`, `totales_por_canal`, `totales_por_concepto`, `gastos_material` y `tickets`. Los totales por concepto salen de `TicketLinea`, no del concepto resumen del pago.
+El origen de caja es solo contexto/default operativo: no hay backfill automático de cajas antiguas, no se infieren tickets por rango de caja, y los reportes monetarios por origen siguen usando `Ingreso.origen`.

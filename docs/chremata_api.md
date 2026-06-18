@@ -17,13 +17,14 @@ No documentar ni commitear tokens reales. Cada Zephyros debe usar su propio toke
 - `CajaSesion` representa una apertura/cierre operativa de caja. Puede iniciar un día y cerrarse después de medianoche; por eso el corte de caja no reemplaza el reporte diario por fecha calendario.
 - `caja_public_id` es el `CajaSesion.public_id`. En operaciones de cobro y gasto material identifica la sesión abierta a la que se asocia el movimiento.
 - `caja_fisica_public_id` es el `CajaFisica.public_id`. En `abrir_caja` es opcional y vincula la sesión operativa con la caja física usada.
+- `origen_ingreso_public_id` en `abrir_caja` es opcional y guarda `CajaSesion.origen_ingreso` como origen por defecto/contexto de la jornada. No reemplaza `ticket.origen_ingreso_public_id`, no modifica tickets existentes y no cambia `Ingreso.origen`.
 - El corte oficial se calcula por sesión operativa (`CajaSesion`), no por día natural.
 
 ## Catálogos y schema de caja
 
 `GET /api/v1/catalogos/` incluye `cajas_fisicas` activas. `seed_chremata_catalogs` crea una `Caja principal` en base limpia.
 
-`GET /api/v1/chremata/schema/` declara `cajas_fisicas`, las operaciones `abrir_caja` y `cerrar_caja`, el campo opcional `caja_public_id` en `cobrar_ticket` y `crear_gasto_material`, y el endpoint de corte:
+`GET /api/v1/chremata/schema/` declara `cajas_fisicas`, `origenes_ingreso`, las operaciones `abrir_caja` y `cerrar_caja`, el campo opcional `origen_ingreso_public_id` en `abrir_caja`, el campo opcional `caja_public_id` en `cobrar_ticket` y `crear_gasto_material`, y el endpoint de corte:
 
 ```text
 /api/v1/chremata/cajas/<caja_public_id>/corte/
@@ -50,6 +51,7 @@ Devuelve el estado consolidado del material pool. El material pool es económico
 ### `GET /api/v1/chremata/cajas/<caja_public_id>/corte/`
 
 Devuelve el corte oficial de una `CajaSesion`. El `caja_public_id` de la URL es el `CajaSesion.public_id`, no el `CajaFisica.public_id`.
+El bloque `caja` incluye `origen_ingreso` como contexto/default de jornada o `null`. Los totales y agrupaciones monetarias por origen siguen saliendo de `Ingreso.origen`.
 
 ### `POST /api/v1/chremata/operations/`
 
@@ -149,13 +151,16 @@ Los UUIDs siguientes son ejemplos sin datos reales.
   "device_entry_id": "018fca4d-6800-7c20-9c3d-9bbdc43a1ac1",
   "caja_public_id": "9b13055e-bd44-47e2-8d19-70fd0a0d0001",
   "caja_fisica_public_id": "30acb409-6528-45c1-92ac-a3d93cb10001",
+  "origen_ingreso_public_id": "f35bc673-8dc6-4244-bcc0-558c3e69b001",
   "abierta_en": "2026-06-17T09:00:00-06:00",
   "saldo_inicial_efectivo": "500.00",
   "notas_apertura": "Inicio de consulta"
 }
 ```
 
-`abrir_caja` crea una `CajaSesion` abierta para el dispositivo. Archeion rechaza abrir otra sesión si el mismo `device_id` ya tiene una caja abierta (`caja_abierta_exists`).
+`abrir_caja` crea una `CajaSesion` abierta para el dispositivo. `origen_ingreso_public_id` puede omitirse, enviarse como `null` o enviarse vacío durante compatibilidad con clientes viejos; en esos casos la caja queda sin origen de jornada. Si se envía, debe existir en `origenes_ingreso` y estar activo. Archeion rechaza abrir otra sesión si el mismo `device_id` ya tiene una caja abierta (`caja_abierta_exists`).
+
+El origen de caja es solo default/contexto operativo. Zephyros actualizado debe guardarlo en `caja_state.json` y copiarlo explícitamente a `crear_ticket` como `ticket.origen_ingreso_public_id`. Archeion no rellena `Ticket.origen` desde la caja, no hace backfill automático de cajas antiguas y no infiere tickets por rango de caja.
 
 ### `cerrar_caja`
 

@@ -565,7 +565,28 @@ class ChremataOperationsApiTests(TestCase):
         ticket = Ticket.objects.get()
         self.assertEqual(str(ticket.public_id), payload["ticket"]["ticket_public_id"])
         self.assertEqual(ticket.estado, Ticket.ESTADO_PENDIENTE)
+        self.assertEqual(ticket.origen, self.origen)
         self.assertEqual(ticket.lineas.get().monto_total, Decimal("160.00"))
+
+    def test_crear_ticket_no_usa_origen_de_caja(self):
+        origen_caja = OrigenIngreso.objects.create(nombre="Similares")
+        caja = CajaSesion.objects.create(
+            device_id="zephyros-cardputer",
+            origen_ingreso=origen_caja,
+            abierta_en=datetime(2026, 6, 18, 4, 30, tzinfo=datetime_timezone.utc),
+        )
+        otro_origen = OrigenIngreso.objects.create(nombre="MetaboCare")
+        payload = self.payload_crear_ticket(
+            ticket={"origen_ingreso_public_id": str(otro_origen.public_id)}
+        )
+
+        response = self.post_operation(payload)
+
+        self.assertEqual(response.status_code, 200)
+        ticket = Ticket.objects.get()
+        self.assertEqual(ticket.origen, otro_origen)
+        caja.refresh_from_db()
+        self.assertEqual(caja.origen_ingreso, origen_caja)
 
     def test_crear_ticket_no_crea_ingreso_ni_ticket_pago(self):
         self.post_operation(self.payload_crear_ticket())
@@ -687,6 +708,19 @@ class ChremataOperationsApiTests(TestCase):
         self.assertEqual(response.status_code, 422)
         self.assertEqual(response.json()["error"]["code"], "reference_not_found")
         self.assertEqual(response.json()["error"]["field"], "origen_ingreso_public_id")
+
+    def test_crear_ticket_sigue_requiriendo_origen_ingreso_public_id(self):
+        payload = self.payload_crear_ticket()
+        del payload["ticket"]["origen_ingreso_public_id"]
+
+        response = self.post_operation(payload)
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()["error"]["code"], "invalid_payload")
+        self.assertEqual(
+            response.json()["error"]["fields"]["origen_ingreso_public_id"],
+            "required",
+        )
 
     def test_concepto_inexistente_devuelve_422(self):
         payload = self.payload_crear_ticket(
@@ -891,6 +925,97 @@ class ChremataOperationsApiTests(TestCase):
             },
         )
 
+    def test_abrir_caja_con_origen_ingreso_valido_asocia_origen(self):
+        payload = self.payload_abrir_caja(
+            origen_ingreso_public_id=str(self.origen.public_id),
+        )
+
+        response = self.post_operation(payload)
+
+        self.assertEqual(response.status_code, 200)
+        caja = CajaSesion.objects.select_related("origen_ingreso").get()
+        self.assertEqual(caja.origen_ingreso, self.origen)
+        self.assertEqual(
+            response.json()["result"]["origen_ingreso"],
+            {
+                "public_id": str(self.origen.public_id),
+                "nombre": "Consultorio",
+            },
+        )
+
+    def test_abrir_caja_sin_origen_ingreso_sigue_funcionando(self):
+        payload = self.payload_abrir_caja()
+
+        response = self.post_operation(payload)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIsNone(CajaSesion.objects.get().origen_ingreso)
+        self.assertIsNone(response.json()["result"]["origen_ingreso"])
+
+    def test_abrir_caja_con_origen_ingreso_null_sigue_funcionando(self):
+        payload = self.payload_abrir_caja(origen_ingreso_public_id=None)
+
+        response = self.post_operation(payload)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIsNone(CajaSesion.objects.get().origen_ingreso)
+        self.assertIsNone(response.json()["result"]["origen_ingreso"])
+
+    def test_abrir_caja_con_origen_ingreso_vacio_sigue_funcionando(self):
+        payload = self.payload_abrir_caja(origen_ingreso_public_id="")
+
+        response = self.post_operation(payload)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIsNone(CajaSesion.objects.get().origen_ingreso)
+        self.assertIsNone(response.json()["result"]["origen_ingreso"])
+
+    def test_abrir_caja_falla_si_origen_ingreso_uuid_es_invalido(self):
+        payload = self.payload_abrir_caja(origen_ingreso_public_id="no-es-uuid")
+
+        response = self.post_operation(payload)
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()["error"]["code"], "invalid_uuid")
+        self.assertEqual(
+            response.json()["error"]["fields"],
+            {"origen_ingreso_public_id": "invalid_uuid"},
+        )
+        self.assertEqual(CajaSesion.objects.count(), 0)
+
+    def test_abrir_caja_falla_si_origen_ingreso_no_existe(self):
+        payload = self.payload_abrir_caja(origen_ingreso_public_id=str(uuid4()))
+
+        response = self.post_operation(payload)
+
+        self.assertEqual(response.status_code, 422)
+        self.assertEqual(response.json()["error"]["code"], "reference_not_found")
+        self.assertEqual(response.json()["error"]["field"], "origen_ingreso_public_id")
+        self.assertEqual(CajaSesion.objects.count(), 0)
+
+    def test_abrir_caja_falla_si_origen_ingreso_esta_inactivo(self):
+        origen_inactivo = OrigenIngreso.objects.create(
+            nombre="Inactivo",
+            activo=False,
+        )
+        payload = self.payload_abrir_caja(
+            origen_ingreso_public_id=str(origen_inactivo.public_id),
+        )
+
+        response = self.post_operation(payload)
+
+        self.assertEqual(response.status_code, 422)
+        self.assertEqual(response.json()["error"]["code"], "business_validation_error")
+        self.assertEqual(
+            response.json()["error"]["fields"],
+            {
+                "origen_ingreso_public_id": [
+                    "El origen de ingreso no está activo."
+                ]
+            },
+        )
+        self.assertEqual(CajaSesion.objects.count(), 0)
+
     def test_abrir_caja_falla_si_caja_fisica_no_existe(self):
         payload = self.payload_abrir_caja(caja_fisica_public_id=str(uuid4()))
 
@@ -923,7 +1048,9 @@ class ChremataOperationsApiTests(TestCase):
         self.assertEqual(CajaSesion.objects.count(), 1)
 
     def test_abrir_caja_es_idempotente_con_mismo_payload(self):
-        payload = self.payload_abrir_caja()
+        payload = self.payload_abrir_caja(
+            origen_ingreso_public_id=str(self.origen.public_id),
+        )
 
         primera = self.post_operation(payload)
         segunda = self.post_operation(payload)
@@ -933,11 +1060,15 @@ class ChremataOperationsApiTests(TestCase):
         self.assertFalse(primera.json()["duplicate"])
         self.assertTrue(segunda.json()["duplicate"])
         self.assertEqual(CajaSesion.objects.count(), 1)
+        self.assertEqual(CajaSesion.objects.get().origen_ingreso, self.origen)
 
     def test_abrir_caja_conflicto_con_misma_llave_payload_distinto(self):
-        payload = self.payload_abrir_caja()
+        payload = self.payload_abrir_caja(
+            origen_ingreso_public_id=str(self.origen.public_id),
+        )
+        otro_origen = OrigenIngreso.objects.create(nombre="MetaboCare")
         conflictivo = dict(payload)
-        conflictivo["saldo_inicial_efectivo"] = "600.00"
+        conflictivo["origen_ingreso_public_id"] = str(otro_origen.public_id)
 
         primera = self.post_operation(payload)
         segunda = self.post_operation(conflictivo)
@@ -1115,6 +1246,21 @@ class ChremataOperationsApiTests(TestCase):
         self.assertEqual(TicketPago.objects.get().caja_sesion, caja)
         self.assertEqual(Ingreso.objects.get().caja_sesion, caja)
         self.assertEqual(OperacionDispositivoChremata.objects.get().caja_sesion, caja)
+
+    def test_cobrar_ticket_usa_origen_del_ticket_aunque_caja_tenga_otro_origen(self):
+        origen_caja = OrigenIngreso.objects.create(nombre="Similares")
+        caja = self.crear_caja_sesion_abierta()
+        caja.origen_ingreso = origen_caja
+        caja.save(update_fields=["origen_ingreso"])
+        ticket = self.crear_ticket_para_cobrar()
+        payload = self.payload_cobrar_ticket(ticket, caja_public_id=str(caja.public_id))
+
+        response = self.post_operation(payload)
+
+        self.assertEqual(response.status_code, 200)
+        ingreso = Ingreso.objects.get()
+        self.assertEqual(ingreso.origen, ticket.origen)
+        self.assertNotEqual(ingreso.origen, caja.origen_ingreso)
 
     def test_cobrar_ticket_falla_si_caja_public_id_no_existe(self):
         ticket = self.crear_ticket_para_cobrar()
@@ -2471,6 +2617,21 @@ class CorteCajaApiTests(TestCase):
         self.assertEqual(corte["efectivo"]["efectivo_esperado"], "500.00")
         self.assertIsNone(corte["efectivo"]["efectivo_contado_cierre"])
         self.assertIsNone(corte["efectivo"]["diferencia_efectivo"])
+        self.assertIsNone(corte["caja"]["origen_ingreso"])
+
+    def test_corte_caja_serializa_origen_ingreso(self):
+        self.caja.origen_ingreso = self.origen
+        self.caja.save(update_fields=["origen_ingreso"])
+
+        corte = calcular_corte_caja(self.caja)
+
+        self.assertEqual(
+            corte["caja"]["origen_ingreso"],
+            {
+                "public_id": str(self.origen.public_id),
+                "nombre": "Consultorio",
+            },
+        )
 
     def test_corte_caja_cerrada_sin_cobros_devuelve_diferencia(self):
         self.caja.estado = CajaSesion.ESTADO_CERRADA
@@ -3488,6 +3649,7 @@ class ChremataSchemaApiTests(TestCase):
                 "device_entry_id",
                 "caja_public_id",
                 "caja_fisica_public_id",
+                "origen_ingreso_public_id",
                 "abierta_en",
                 "saldo_inicial_efectivo",
                 "notas_apertura",
@@ -3512,6 +3674,16 @@ class ChremataSchemaApiTests(TestCase):
         )
         self.assertFalse(abrir_fields["caja_fisica_public_id"]["required"])
         self.assertTrue(abrir_fields["caja_fisica_public_id"]["nullable"])
+        self.assertEqual(
+            abrir_fields["origen_ingreso_public_id"]["relation"],
+            "origenes_ingreso.public_id",
+        )
+        self.assertFalse(abrir_fields["origen_ingreso_public_id"]["required"])
+        self.assertTrue(abrir_fields["origen_ingreso_public_id"]["nullable"])
+        self.assertIn(
+            "no reemplaza",
+            abrir_fields["origen_ingreso_public_id"]["description"],
+        )
         self.assertEqual(cerrar_fields["caja_public_id"]["relation"], "caja_sesion.public_id")
         self.assertEqual(abrir_fields["saldo_inicial_efectivo"]["type"], "money_string")
         self.assertEqual(cerrar_fields["efectivo_contado_cierre"]["type"], "money_string")

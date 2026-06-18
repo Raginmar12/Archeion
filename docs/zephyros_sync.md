@@ -136,8 +136,10 @@ No usar:
 
 - `CajaFisica` es la caja real con llave; Zephyros obtiene `caja_fisica_public_id` desde `cajas_fisicas` de catálogos/schema.
 - `CajaSesion` es la sesión operativa de apertura/cierre; `caja_public_id` es su UUID público.
-- `abrir_caja` y `cerrar_caja` se sincronizan por `POST /api/v1/chremata/operations/` con campos top-level, igual que el resto de operaciones.
+- `abrir_caja` y `cerrar_caja` se sincronizan por `POST /api/v1/chremata/operations/` con campos top-level, igual que el resto de operaciones. `abrir_caja` acepta `origen_ingreso_public_id` opcional para guardar `CajaSesion.origen_ingreso` como default/contexto de jornada.
+- Zephyros actualizado debe guardar ese origen de caja en `caja_state.json` y copiarlo a `crear_ticket` como `ticket.origen_ingreso_public_id`. Clientes viejos pueden abrir caja sin origen durante compatibilidad.
 - `cobrar_ticket` y `crear_gasto_material` aceptan `caja_public_id` opcional por compatibilidad temporal; el cliente Zephyros debe enviarlo cuando tenga caja abierta. Si un `GastoMaterial` incluye `caja_public_id`, Archeion lo interpreta como salida física de efectivo de esa `CajaSesion` y lo resta del efectivo esperado del corte. Si no incluye `caja_public_id`, afecta el material pool global, pero no el corte de una caja específica.
 - Crear ticket pendiente puede hacerse sin caja. Cobrar ticket en Zephyros requiere caja abierta.
 - El corte local de Zephyros es auxiliar para operar offline; el corte oficial se consulta en Archeion con `GET /api/v1/chremata/cajas/<caja_public_id>/corte/`.
 - El corte oficial no reemplaza reportes diarios: está delimitado por `CajaSesion` y puede cruzar medianoche.
+- El origen de caja no reemplaza el origen histórico del ticket ni del ingreso: Archeion no rellena `Ticket.origen` desde `CajaSesion.origen_ingreso`, no hace backfill automático de cajas antiguas y no infiere tickets por rango de caja. Los reportes monetarios por origen siguen usando `Ingreso.origen`.
