@@ -160,8 +160,8 @@ El corte local de Zephyros es auxiliar. El corte oficial vive en Archeion y se c
 - Que todas las operaciones estén `synced`.
 - Que los cobros tengan el `caja_public_id` correcto.
 - Que los totales por concepto en Archeion salen de `TicketLinea`, no del concepto resumen del pago.
-- Que `efectivo_esperado = saldo_inicial_efectivo + total_efectivo`.
-- Que gastos de material se reportan aparte y no restan efectivo esperado.
+- Que `efectivo_esperado = saldo_inicial_efectivo + total_efectivo - gastos_material asociados a la CajaSesion`.
+- Que los gastos de material pagados físicamente desde la caja tengan el `caja_public_id` correcto; esos gastos se reportan aparte y restan efectivo esperado. Los gastos sin `CajaSesion` afectan el material pool global, pero no ese corte.
 
 ## Cobros sin caja por compatibilidad temporal
 

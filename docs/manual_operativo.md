@@ -108,7 +108,7 @@ Guardar respaldos fuera del repositorio si contienen información real.
 1. Abrir caja antes de consulta, eligiendo la `CajaFisica` real con llave cuando esté disponible en catálogos.
 2. Crear tickets pendientes conforme se necesite; pueden existir sin caja porque todavía no representan ingreso.
 3. Cobrar tickets únicamente con caja abierta en Zephyros; el cobro pertenece a la `CajaSesion`, no al ticket pendiente.
-4. Registrar gastos de material asociados a la caja si ocurrieron durante la sesión. Estos gastos aparecen aparte en el corte y no reducen el efectivo esperado.
+4. Registrar gastos de material asociados a la caja si ocurrieron durante la sesión y salieron físicamente de esa caja. Estos gastos aparecen aparte en el corte y reducen el efectivo esperado; los gastos sin `CajaSesion` afectan el material pool global, pero no el corte de una caja específica.
 5. Cerrar caja al final con el efectivo contado.
 6. Sincronizar todas las operaciones pendientes.
 7. Comparar el corte local de Zephyros con el corte oficial de Archeion. Si hay diferencia, Archeion es la fuente de verdad.

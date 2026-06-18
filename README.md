@@ -156,7 +156,7 @@ Operaciones Chremata vigentes:
 
 1. Antes de consulta, Zephyros abre una caja con `abrir_caja`, generando una `CajaSesion` asociada opcionalmente a una `CajaFisica`.
 2. Durante consulta, se pueden crear tickets pendientes sin caja; cobrar un ticket en Zephyros requiere caja abierta y debe enviar `caja_public_id`.
-3. Los gastos de material capturados durante la sesión pueden enviar el mismo `caja_public_id`; se reportan aparte en el corte y no reducen el efectivo esperado.
+3. Los gastos de material capturados durante la sesión pueden enviar el mismo `caja_public_id`; se reportan aparte en el corte y, cuando están asociados a la `CajaSesion`, representan salida física de efectivo y reducen el efectivo esperado. Los gastos sin `CajaSesion` siguen afectando el material pool global, pero no el corte de una caja específica.
 4. Al final, Zephyros cierra la caja con `cerrar_caja`, enviando el efectivo contado. Archeion calcula y guarda el `resumen_snapshot`.
 5. Después de sincronizar, comparar el corte local auxiliar de Zephyros contra `GET /api/v1/chremata/cajas/<caja_public_id>/corte/`, que es la autoridad.
 
