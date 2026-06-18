@@ -163,10 +163,10 @@
   {% if reporte.cajas.intersectan_periodo %}
     <div class="table-wrapper">
       <table>
-        <thead><tr><th>Caja</th><th>Estado</th><th>Apertura</th><th>Cierre</th><th>Efectivo esperado</th><th>Diferencia</th><th>Corte</th></tr></thead>
+        <thead><tr><th>Caja</th><th>Origen jornada</th><th>Estado</th><th>Apertura</th><th>Cierre</th><th>Efectivo esperado</th><th>Diferencia</th><th>Corte</th></tr></thead>
         <tbody>
           {% for caja in reporte.cajas.intersectan_periodo %}
-            <tr><td>{{ caja.caja_fisica.nombre|default:caja.caja_public_id }}</td><td>{{ caja.estado }}</td><td>{{ caja.abierta_en }}</td><td>{{ caja.cerrada_en|default:"—" }}</td><td>${{ caja.efectivo_esperado }}</td><td>${{ caja.diferencia_efectivo }}</td><td><a href="{% url 'chremata_caja_detalle' caja.caja_public_id %}">Ver corte</a></td></tr>
+            <tr><td>{{ caja.caja_fisica.nombre|default:caja.caja_public_id }}</td><td>{{ caja.origen_ingreso.nombre|default:"Sin origen de jornada" }}</td><td>{{ caja.estado }}</td><td>{{ caja.abierta_en }}</td><td>{{ caja.cerrada_en|default:"—" }}</td><td>${{ caja.efectivo_esperado }}</td><td>${{ caja.diferencia_efectivo }}</td><td><a href="{% url 'chremata_caja_detalle' caja.caja_public_id %}">Ver corte</a></td></tr>
           {% endfor %}
         </tbody>
       </table>

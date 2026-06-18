@@ -4,6 +4,7 @@ from uuid import UUID
 from django.contrib import admin
 from django.core.exceptions import ValidationError
 from django.db import models
+from django.db.models.deletion import ProtectedError
 from django.forms import modelform_factory
 from django.test import TestCase
 from django.utils import timezone
@@ -47,6 +48,26 @@ class CajaTests(TestCase):
         self.assertEqual(sesion.estado, CajaSesion.ESTADO_ABIERTA)
         self.assertIsNone(sesion.cerrada_en)
         self.assertEqual(sesion.saldo_inicial_efectivo, Decimal("500.00"))
+        self.assertIsNone(sesion.origen_ingreso)
+
+    def test_caja_sesion_origen_ingreso_es_opcional_y_protegido(self):
+        origen = OrigenIngreso.objects.create(nombre="Similares")
+        sesion = CajaSesion.objects.create(
+            device_id="zephyros-cardputer-principal",
+            origen_ingreso=origen,
+            abierta_en=timezone.now(),
+        )
+
+        self.assertEqual(sesion.origen_ingreso, origen)
+        with self.assertRaises(ProtectedError):
+            origen.delete()
+
+    def test_caja_sesion_admin_expone_origen_ingreso(self):
+        admin_model = admin.site._registry[CajaSesion]
+
+        self.assertIn("origen_ingreso", admin_model.list_display)
+        self.assertIn("origen_ingreso", admin_model.list_filter)
+        self.assertIn("origen_ingreso__nombre", admin_model.search_fields)
 
     def test_caja_sesion_cerrada_requiere_cerrada_en(self):
         sesion = CajaSesion(

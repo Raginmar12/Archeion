@@ -147,6 +147,15 @@ login, puede consultarse desde teléfono en la red local, usa `calcular_corte_ca
 y es distinto del endpoint API `/api/v1/chremata/cajas/<caja_public_id>/corte/` que
 consume Zephyros.
 
+Al abrir caja, Zephyros actualizado puede enviar `origen_ingreso_public_id` como
+origen por defecto de la jornada. Ese valor queda guardado en `CajaSesion.origen_ingreso`
+y sirve solo como contexto/default operativo: el ticket sigue guardando su propio
+origen histórico en `Ticket.origen`, y el cobro oficial sigue guardándolo en
+`Ingreso.origen`. Zephyros debe persistir ese origen en `caja_state.json` y copiarlo
+a `crear_ticket` como `ticket.origen_ingreso_public_id`; clientes viejos pueden abrir
+caja sin origen durante compatibilidad. No hay backfill automático de cajas antiguas
+ni inferencia de tickets por rango de caja.
+
 ## Dashboard principal de Chremata
 
 La portada operativa de Chremata está en:

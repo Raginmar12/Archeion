@@ -345,6 +345,15 @@ def _serializar_caja_fisica_operacion(caja_fisica):
     }
 
 
+def _serializar_origen_ingreso_operacion(origen_ingreso):
+    if origen_ingreso is None:
+        return None
+    return {
+        "public_id": str(origen_ingreso.public_id),
+        "nombre": origen_ingreso.nombre,
+    }
+
+
 def _resultado_caja_abierta(caja):
     return {
         "caja_public_id": str(caja.public_id),
@@ -354,6 +363,7 @@ def _resultado_caja_abierta(caja):
             caja.saldo_inicial_efectivo,
         ),
         "caja_fisica": _serializar_caja_fisica_operacion(caja.caja_fisica),
+        "origen_ingreso": _serializar_origen_ingreso_operacion(caja.origen_ingreso),
     }
 
 
@@ -431,6 +441,29 @@ def _handle_abrir_caja(payload):
                 status_code=422,
             )
 
+    origen_ingreso = None
+    if payload.get("origen_ingreso_public_id") not in (None, ""):
+        origen_ingreso_public_id = parse_uuid(
+            payload["origen_ingreso_public_id"],
+            "origen_ingreso_public_id",
+        )
+        origen_ingreso = get_by_public_id(
+            OrigenIngreso,
+            origen_ingreso_public_id,
+            "origen_ingreso_public_id",
+        )
+        if not origen_ingreso.activo:
+            raise OperationValidationError(
+                "business_validation_error",
+                "El origen de ingreso no está activo.",
+                fields={
+                    "origen_ingreso_public_id": [
+                        "El origen de ingreso no está activo."
+                    ]
+                },
+                status_code=422,
+            )
+
     if CajaSesion.objects.filter(public_id=caja_public_id).exists():
         raise OperationValidationError(
             "caja_public_id_conflict",
@@ -455,6 +488,7 @@ def _handle_abrir_caja(payload):
         public_id=caja_public_id,
         device_id=payload["device_id"],
         caja_fisica=caja_fisica,
+        origen_ingreso=origen_ingreso,
         estado=CajaSesion.ESTADO_ABIERTA,
         abierta_en=abierta_en,
         saldo_inicial_efectivo=saldo_inicial_efectivo,
@@ -473,6 +507,9 @@ def _crear_resumen_snapshot_cierre(caja):
             "estado": result["estado"],
             "device_id": caja.device_id,
             "caja_fisica": _serializar_caja_fisica_operacion(caja.caja_fisica),
+            "origen_ingreso": _serializar_origen_ingreso_operacion(
+                caja.origen_ingreso
+            ),
             "abierta_en": result["abierta_en"],
             "cerrada_en": result["cerrada_en"],
         },

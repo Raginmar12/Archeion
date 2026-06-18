@@ -42,12 +42,14 @@ def dashboard(request):
 
     caja_abierta = (
         CajaSesion.objects.filter(estado=CajaSesion.ESTADO_ABIERTA)
-        .select_related("caja_fisica")
+        .select_related("caja_fisica", "origen_ingreso")
         .order_by("-abierta_en")
         .first()
     )
     ultima_caja = (
-        CajaSesion.objects.select_related("caja_fisica").order_by("-abierta_en").first()
+        CajaSesion.objects.select_related("caja_fisica", "origen_ingreso")
+        .order_by("-abierta_en")
+        .first()
     )
     caja_resumen = caja_abierta or ultima_caja
 
@@ -224,7 +226,7 @@ def reporte_anio(request):
 @login_required
 def caja_detalle(request, public_id):
     caja = get_object_or_404(
-        CajaSesion.objects.select_related("caja_fisica"),
+        CajaSesion.objects.select_related("caja_fisica", "origen_ingreso"),
         public_id=public_id,
     )
     corte = calcular_corte_caja(caja)

@@ -45,11 +45,18 @@ def _serializar_caja(caja_sesion):
             "public_id": str(caja_sesion.caja_fisica.public_id),
             "nombre": caja_sesion.caja_fisica.nombre,
         }
+    origen_ingreso = None
+    if caja_sesion.origen_ingreso_id:
+        origen_ingreso = {
+            "public_id": str(caja_sesion.origen_ingreso.public_id),
+            "nombre": caja_sesion.origen_ingreso.nombre,
+        }
     return {
         "caja_public_id": str(caja_sesion.public_id),
         "estado": caja_sesion.estado,
         "device_id": caja_sesion.device_id,
         "caja_fisica": caja_fisica,
+        "origen_ingreso": origen_ingreso,
         "abierta_en": _datetime_utc(caja_sesion.abierta_en),
         "cerrada_en": _datetime_utc(caja_sesion.cerrada_en),
     }

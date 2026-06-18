@@ -285,7 +285,7 @@ def _serializar_cajas(inicio, fin):
     cajas = (
         CajaSesion.objects.filter(abierta_en__lt=fin)
         .filter(Q(cerrada_en__isnull=True) | Q(cerrada_en__gt=inicio))
-        .select_related("caja_fisica")
+        .select_related("caja_fisica", "origen_ingreso")
         .order_by("abierta_en", "id")
     )
     cajas_lista = []
@@ -295,6 +295,12 @@ def _serializar_cajas(inicio, fin):
             caja_fisica = {
                 "public_id": str(caja.caja_fisica.public_id),
                 "nombre": caja.caja_fisica.nombre,
+            }
+        origen_ingreso = None
+        if caja.origen_ingreso_id:
+            origen_ingreso = {
+                "public_id": str(caja.origen_ingreso.public_id),
+                "nombre": caja.origen_ingreso.nombre,
             }
         total_gastos_material_caja = (
             GastoMaterial.objects.filter(caja_sesion=caja).aggregate(total=Sum("monto"))[
@@ -306,6 +312,7 @@ def _serializar_cajas(inicio, fin):
             {
                 "caja_public_id": str(caja.public_id),
                 "caja_fisica": caja_fisica,
+                "origen_ingreso": origen_ingreso,
                 "estado": caja.estado,
                 "abierta_en": _datetime_local(caja.abierta_en),
                 "cerrada_en": _datetime_local(caja.cerrada_en),

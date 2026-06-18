@@ -50,6 +50,12 @@ periodo se muestran solo como complemento informativo y enlazan a la vista HTML
 `/chremata/cajas/<public_id>/`. Esa vista requiere login, usa `calcular_corte_caja()`
 y no reemplaza el endpoint API de corte usado por Zephyros.
 
+`CajaSesion.origen_ingreso` es un contexto/default opcional de jornada. Puede usarse
+para que Zephyros proponga el origen al crear tickets durante una caja abierta, pero
+no reemplaza `Ticket.origen` ni `Ingreso.origen`. No hay backfill automático de cajas
+antiguas y no se infieren tickets por rango de caja; los tickets e ingresos históricos
+conservan su propio origen congelado.
+
 Para reportes de periodo, `Ingreso` es la fuente oficial de totales monetarios:
 importe bruto, procedimiento, material cobrado, material recuperado, material
 excedente y comisiones. Las comisiones no se recalculan en el reporte; se leen
@@ -78,6 +84,8 @@ El desglose real por concepto de tickets cobrados sale de `TicketLinea`, filtrad
 por la fecha de `TicketPago`. Esto evita colapsar tickets multilínea en el concepto
 resumen de `TicketPago` o `Ingreso`. Los ingresos directos sin `TicketPago` se
 reportan por separado para no mezclar fuentes de concepto de forma ambigua.
+El desglose monetario por origen sigue usando `Ingreso.origen`, no
+`CajaSesion.origen_ingreso`, porque el origen de caja solo es contexto operativo.
 
 `GastoMaterial` entra al reporte por su propia fecha, tenga o no una caja asociada.
 El balance de material del reporte es un balance simple del periodo

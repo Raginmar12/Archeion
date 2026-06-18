@@ -71,6 +71,14 @@ class CajaSesion(models.Model):
         blank=True,
         related_name="sesiones",
     )
+    origen_ingreso = models.ForeignKey(
+        "OrigenIngreso",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="cajas_sesion",
+        verbose_name="origen de ingreso por defecto",
+    )
     estado = models.CharField(
         max_length=20,
         choices=ESTADOS,

@@ -374,6 +374,17 @@ def _chremata_operations_schema():
                 nullable=True,
                 relation="cajas_fisicas.public_id",
             ),
+            _campo_schema(
+                "origen_ingreso_public_id",
+                "uuid",
+                required=False,
+                nullable=True,
+                relation="origenes_ingreso.public_id",
+                description=(
+                    "Origen por defecto/contexto de la caja; no reemplaza "
+                    "ticket.origen_ingreso_public_id."
+                ),
+            ),
             _campo_schema("abierta_en", "datetime_utc_string"),
             _campo_schema("saldo_inicial_efectivo", "money_string"),
             _campo_schema("notas_apertura", "string", required=False),

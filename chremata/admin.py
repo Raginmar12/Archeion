@@ -32,6 +32,7 @@ class CajaSesionAdmin(admin.ModelAdmin):
         "public_id",
         "device_id",
         "caja_fisica",
+        "origen_ingreso",
         "estado",
         "abierta_en",
         "cerrada_en",
@@ -42,10 +43,17 @@ class CajaSesionAdmin(admin.ModelAdmin):
         "public_id",
         "device_id",
         "caja_fisica__nombre",
+        "origen_ingreso__nombre",
         "notas_apertura",
         "notas_cierre",
     )
-    list_filter = ("estado", "caja_fisica", "abierta_en", "cerrada_en")
+    list_filter = (
+        "estado",
+        "caja_fisica",
+        "origen_ingreso",
+        "abierta_en",
+        "cerrada_en",
+    )
     date_hierarchy = "abierta_en"
 
 
