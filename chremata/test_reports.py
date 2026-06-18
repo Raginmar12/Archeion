@@ -17,6 +17,7 @@ from .models import (
     OrigenIngreso,
     Ticket,
     TicketLinea,
+    TicketPago,
 )
 from .reports import (
     calcular_reporte_chremata_periodo,
@@ -468,6 +469,110 @@ class ReporteDiarioViewTests(TestCase):
                 "pendientes": 0,
             },
         }
+
+
+    def test_dashboard_url_name_resuelve(self):
+        match = resolve("/chremata/")
+
+        self.assertEqual(match.url_name, "chremata_dashboard")
+
+    def test_dashboard_no_autenticado_redirige_a_login(self):
+        response = self.client.get(reverse("chremata_dashboard"))
+
+        self.assertEqual(response.status_code, 302)
+        self.assertIn("/accounts/login/", response["Location"])
+        self.assertIn("next=/chremata/", response["Location"])
+
+    def test_dashboard_autenticado_carga_sin_datos(self):
+        self.login()
+
+        response = self.client.get(reverse("chremata_dashboard"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTemplateUsed(response, "chremata/dashboard.html")
+        self.assertContains(response, "Chremata")
+        self.assertContains(response, "Sin cajas registradas")
+        self.assertContains(response, "Reporte diario")
+
+    def test_dashboard_usa_reportes_para_hoy_semana_y_mes(self):
+        self.login()
+
+        with patch(
+            "chremata.views.calcular_reporte_chremata_periodo",
+            return_value=self.reporte_fake(),
+        ) as calcular_reporte:
+            response = self.client.get(reverse("chremata_dashboard"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(calcular_reporte.call_count, 3)
+        self.assertEqual(
+            [call.kwargs["tipo_periodo"] for call in calcular_reporte.call_args_list],
+            ["dia", "semana", "mes"],
+        )
+
+    def test_dashboard_muestra_datos_basicos_recientes_y_sin_link_roto_caja(self):
+        metodo = MetodoPago.objects.create(nombre="Efectivo")
+        canal = CanalCobro.objects.create(nombre="Efectivo en caja", metodo_pago=metodo)
+        esquema = EsquemaComision.objects.create(
+            nombre="Sin comisión",
+            porcentaje_base=Decimal("0.0000"),
+        )
+        esquema.canales_cobro.add(canal)
+        canal.esquema_comision_predeterminado = esquema
+        canal.save()
+        concepto = ConceptoIngreso.objects.create(nombre="Consulta")
+        origen = OrigenIngreso.objects.create(nombre="Consultorio")
+        hoy = timezone.localdate()
+        fecha = datetime(
+            hoy.year,
+            hoy.month,
+            hoy.day,
+            10,
+            0,
+            tzinfo=timezone.get_current_timezone(),
+        )
+        caja = CajaSesion.objects.create(
+            device_id="zephyros",
+            abierta_en=fecha,
+            saldo_inicial_efectivo=Decimal("100.00"),
+        )
+        ingreso = Ingreso.objects.create(
+            fecha=fecha,
+            monto_procedimiento=Decimal("123.00"),
+            concepto=concepto,
+            canal_cobro=canal,
+            origen=origen,
+            caja_sesion=caja,
+        )
+        ticket = Ticket.objects.create(
+            fecha=fecha,
+            estado=Ticket.ESTADO_COBRADO,
+            nombre_referencia="Cobro reciente",
+            origen=origen,
+        )
+        TicketPago.objects.create(
+            ticket=ticket,
+            ingreso=ingreso,
+            fecha=fecha,
+            canal_cobro=canal,
+            concepto_ingreso=concepto,
+            caja_sesion=caja,
+        )
+        GastoMaterial.objects.create(
+            fecha=fecha,
+            monto=Decimal("10.00"),
+            descripcion="Gasas",
+            caja_sesion=caja,
+        )
+        self.login()
+
+        response = self.client.get(reverse("chremata_dashboard"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "$123.00")
+        self.assertContains(response, "Cobro reciente")
+        self.assertContains(response, "Gasas")
+        self.assertNotContains(response, "/chremata/cajas/")
 
     def test_url_name_resuelve_reporte_diario(self):
         match = resolve("/chremata/reportes/dia/")

@@ -140,3 +140,23 @@ fecha propia de `GastoMaterial`.
 
 Todavía no hay dashboard principal ni reportes semanal, mensual o anual en HTML; esta
 fase solo expone la vista diaria.
+
+## Dashboard principal de Chremata
+
+La portada operativa de Chremata está en:
+
+```text
+/chremata/
+```
+
+Requiere login de Django y está pensada para consultarse desde teléfono o computadora
+en la red local. Muestra un resumen de hoy, esta semana y este mes, además de caja
+abierta o última caja, material pool actual, últimos cobros y últimos gastos.
+
+El dashboard no reemplaza el Django Admin: el admin sigue siendo el lugar para
+mantenimiento detallado de catálogos y revisión de registros. Tampoco reemplaza el
+corte de caja, porque el corte pertenece a una `CajaSesion` operativa y puede cruzar
+medianoche. El reporte diario detallado sigue disponible en `/chremata/reportes/dia/`.
+
+En esta fase no hay vistas HTML de reporte semanal, mensual, anual ni detalle de caja;
+los indicadores semanales y mensuales del dashboard son solo resumen operativo.

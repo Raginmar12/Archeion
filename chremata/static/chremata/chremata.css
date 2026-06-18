@@ -192,3 +192,118 @@ th { color: var(--muted); }
   display: grid;
   gap: 0.3rem;
 }
+
+.quick-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+}
+
+.button-link {
+  background: var(--accent);
+  border-radius: 0.6rem;
+  color: white;
+  display: inline-block;
+  padding: 0.5rem 0.75rem;
+  text-decoration: none;
+}
+
+.button-link.secondary {
+  background: #5f6f52;
+}
+
+.button-link.disabled {
+  background: #d8d2c5;
+  color: var(--muted);
+}
+
+.dashboard-grid {
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  margin-top: 1rem;
+}
+
+.dashboard-grid.two-columns {
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+}
+
+.dashboard-card {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 0.8rem;
+  padding: 1rem;
+}
+
+.highlight-card {
+  border-color: var(--accent);
+}
+
+.dashboard-card h2 {
+  margin-top: 0;
+}
+
+.metric-list {
+  display: grid;
+  gap: 0.6rem;
+  margin: 0 0 1rem;
+}
+
+.metric-list div {
+  display: flex;
+  gap: 1rem;
+  justify-content: space-between;
+}
+
+.metric-list dt {
+  color: var(--muted);
+}
+
+.metric-list dd {
+  font-weight: 700;
+  margin: 0;
+  text-align: right;
+}
+
+.metric-list.compact div {
+  display: grid;
+  gap: 0.15rem;
+}
+
+.metric-list.compact dd {
+  text-align: left;
+}
+
+.status-pill {
+  background: #eee7d8;
+  border-radius: 999px;
+  color: var(--accent);
+  display: inline-block;
+  font-weight: 700;
+  padding: 0.2rem 0.55rem;
+}
+
+.activity-list {
+  display: grid;
+  gap: 0.75rem;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.activity-list li {
+  border-bottom: 1px solid var(--line);
+  display: grid;
+  gap: 0.15rem;
+  padding-bottom: 0.75rem;
+}
+
+.activity-list li:last-child {
+  border-bottom: 0;
+  padding-bottom: 0;
+}
+
+.activity-list span {
+  color: var(--muted);
+  font-size: 0.92rem;
+}

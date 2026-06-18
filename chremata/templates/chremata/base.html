@@ -10,10 +10,11 @@
 <body>
   <header class="site-header">
     <div>
-      <a class="brand" href="{% url 'chremata_reporte_diario' %}">Archeion / Chremata</a>
+      <a class="brand" href="{% url 'chremata_dashboard' %}">Archeion / Chremata</a>
       <p class="subtitle">Reportes locales protegidos</p>
     </div>
     <nav class="site-nav" aria-label="Navegación principal">
+      <a href="{% url 'chremata_dashboard' %}">Dashboard</a>
       <a href="{% url 'chremata_reporte_diario' %}">Reporte diario</a>
       <a href="{% url 'admin:index' %}">Admin</a>
       {% if user.is_authenticated %}

@@ -1,0 +1,125 @@
+{% extends "chremata/base.html" %}
+
+{% block title %}Chremata{% endblock %}
+
+{% block content %}
+<section class="page-heading">
+  <div>
+    <h1>Chremata</h1>
+    <p>Resumen operativo local del {{ fecha_hoy|date:"Y-m-d" }}</p>
+    <p class="muted">Zona horaria: {{ timezone_actual }}</p>
+  </div>
+  <nav class="quick-links" aria-label="Accesos principales">
+    <a class="button-link" href="{% url 'chremata_reporte_diario' %}">Reporte diario</a>
+    <a class="button-link secondary" href="{% url 'admin:index' %}">Admin</a>
+    <span class="button-link disabled">Semanal pendiente</span>
+    <span class="button-link disabled">Mensual pendiente</span>
+  </nav>
+</section>
+
+<section class="dashboard-grid" aria-label="Resumen de periodos">
+  <article class="dashboard-card highlight-card">
+    <h2>Hoy</h2>
+    <dl class="metric-list">
+      <div><dt>Total bruto</dt><dd>${{ reporte_hoy.totales.total_bruto }}</dd></div>
+      <div><dt>Neto estimado</dt><dd>${{ reporte_hoy.totales.total_neto_estimado }}</dd></div>
+      <div><dt>Tickets cobrados</dt><dd>{{ reporte_hoy.actividad.tickets_cobrados }}</dd></div>
+      <div><dt>Gastos de material</dt><dd>${{ reporte_hoy.totales.total_gastos_material }}</dd></div>
+      <div><dt>Balance material</dt><dd>${{ reporte_hoy.totales.balance_material_periodo }}</dd></div>
+    </dl>
+    <a href="{% url 'chremata_reporte_diario' %}?fecha={{ fecha_hoy|date:'Y-m-d' }}">Ver reporte diario</a>
+  </article>
+
+  <article class="dashboard-card">
+    <h2>Esta semana</h2>
+    <dl class="metric-list">
+      <div><dt>Total bruto</dt><dd>${{ reporte_semana.totales.total_bruto }}</dd></div>
+      <div><dt>Neto estimado</dt><dd>${{ reporte_semana.totales.total_neto_estimado }}</dd></div>
+      <div><dt>Tickets cobrados</dt><dd>{{ reporte_semana.actividad.tickets_cobrados }}</dd></div>
+      <div><dt>Gastos de material</dt><dd>${{ reporte_semana.totales.total_gastos_material }}</dd></div>
+    </dl>
+  </article>
+
+  <article class="dashboard-card">
+    <h2>Este mes</h2>
+    <dl class="metric-list">
+      <div><dt>Total bruto</dt><dd>${{ reporte_mes.totales.total_bruto }}</dd></div>
+      <div><dt>Neto estimado</dt><dd>${{ reporte_mes.totales.total_neto_estimado }}</dd></div>
+      <div><dt>Tickets cobrados</dt><dd>{{ reporte_mes.actividad.tickets_cobrados }}</dd></div>
+      <div><dt>Gastos de material</dt><dd>${{ reporte_mes.totales.total_gastos_material }}</dd></div>
+    </dl>
+  </article>
+
+  <article class="dashboard-card">
+    <h2>Caja</h2>
+    {% if caja_resumen %}
+      <p><span class="status-pill">{{ caja_resumen.estado }}</span></p>
+      <dl class="metric-list compact">
+        <div><dt>Caja física</dt><dd>{{ caja_resumen.caja_fisica.nombre|default:"Sin caja física" }}</dd></div>
+        <div><dt>Abierta en</dt><dd>{{ caja_resumen.abierta_en }}</dd></div>
+        {% if caja_abierta %}
+          <div><dt>Saldo inicial</dt><dd>${{ caja_resumen.saldo_inicial_efectivo }}</dd></div>
+        {% else %}
+          <div><dt>Cerrada en</dt><dd>{{ caja_resumen.cerrada_en|default:"—" }}</dd></div>
+          <div><dt>Efectivo esperado</dt><dd>${{ caja_resumen.efectivo_esperado }}</dd></div>
+          <div><dt>Efectivo contado</dt><dd>${{ caja_resumen.efectivo_contado_cierre|default:"—" }}</dd></div>
+          <div><dt>Diferencia</dt><dd>${{ caja_resumen.diferencia_efectivo }}</dd></div>
+        {% endif %}
+      </dl>
+      <p class="muted">Detalle HTML de caja pendiente.</p>
+    {% else %}
+      <p class="empty">Sin cajas registradas.</p>
+    {% endif %}
+  </article>
+
+  <article class="dashboard-card">
+    <h2>Material pool</h2>
+    <dl class="metric-list">
+      <div><dt>Pool actual</dt><dd>${{ material_pool.pool_material_actual }}</dd></div>
+      <div><dt>Gastos históricos</dt><dd>${{ material_pool.total_gastos_material }}</dd></div>
+      <div><dt>Material recuperado</dt><dd>${{ material_pool.total_material_recuperado }}</dd></div>
+    </dl>
+    {% if material_pool.ultimo_gasto_material_fecha %}
+      <p class="muted">Último gasto: {{ material_pool.ultimo_gasto_material_fecha }}</p>
+    {% endif %}
+  </article>
+</section>
+
+<section class="dashboard-grid two-columns" aria-label="Actividad reciente">
+  <article class="dashboard-card">
+    <h2>Últimos cobros</h2>
+    {% if ultimos_cobros %}
+      <ul class="activity-list">
+        {% for pago in ultimos_cobros %}
+          <li>
+            <strong>${{ pago.ingreso.monto_total }}</strong>
+            <span>{{ pago.fecha }}</span>
+            <span>{{ pago.canal_cobro.metodo_pago.nombre }} · {{ pago.canal_cobro.nombre }}</span>
+            <span>{{ pago.ticket.nombre_referencia|default:pago.ticket.public_id }}</span>
+          </li>
+        {% endfor %}
+      </ul>
+    {% else %}
+      <p class="empty">Sin cobros recientes.</p>
+    {% endif %}
+  </article>
+
+  <article class="dashboard-card">
+    <h2>Últimos gastos</h2>
+    {% if ultimos_gastos %}
+      <ul class="activity-list">
+        {% for gasto in ultimos_gastos %}
+          <li>
+            <strong>${{ gasto.monto }}</strong>
+            <span>{{ gasto.fecha }}</span>
+            <span>{{ gasto.descripcion|default:"Sin descripción" }}</span>
+            <span>{% if gasto.caja_sesion_id %}Con caja{% else %}Sin caja{% endif %}</span>
+          </li>
+        {% endfor %}
+      </ul>
+    {% else %}
+      <p class="empty">Sin gastos recientes.</p>
+    {% endif %}
+  </article>
+</section>
+{% endblock %}
