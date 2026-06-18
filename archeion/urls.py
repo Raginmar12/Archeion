@@ -16,7 +16,7 @@ Including another URLconf
 """
 
 from django.contrib import admin
-from django.urls import path
+from django.urls import include, path
 
 from chremata.views_api import (
     catalogos,
@@ -30,6 +30,8 @@ from .views import device_ping
 
 urlpatterns = [
     path("admin/", admin.site.urls),
+    path("accounts/", include("django.contrib.auth.urls")),
+    path("chremata/", include("chremata.urls")),
     path("api/device/ping/", device_ping, name="device-ping"),
     path("api/v1/catalogos/", catalogos, name="api-v1-catalogos"),
     path(

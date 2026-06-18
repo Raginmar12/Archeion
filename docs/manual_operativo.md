@@ -112,3 +112,31 @@ Guardar respaldos fuera del repositorio si contienen información real.
 5. Cerrar caja al final con el efectivo contado.
 6. Sincronizar todas las operaciones pendientes.
 7. Comparar el corte local de Zephyros con el corte oficial de Archeion. Si hay diferencia, Archeion es la fuente de verdad.
+
+## Reporte diario Chremata en Archeion
+
+Archeion expone el reporte diario HTML en la red local en:
+
+```text
+/chremata/reportes/dia/
+```
+
+La vista requiere usuario y contraseña de Django. Si el usuario no ha iniciado sesión,
+Django redirige primero a `/accounts/login/` y después permite consultar el reporte.
+
+Por defecto muestra el día local actual. Para consultar una fecha específica, usar el
+parámetro `fecha` en formato `YYYY-MM-DD`:
+
+```text
+/chremata/reportes/dia/?fecha=2026-06-18
+```
+
+Este reporte diario es un periodo calendario local calculado con la zona horaria
+configurada en `ARCHEION_TIME_ZONE`. No es lo mismo que el corte de caja: una
+`CajaSesion` puede cruzar medianoche y aparece solo como complemento informativo del
+reporte diario cuando intersecta el periodo. El dinero del reporte sale de `Ingreso`,
+el desglose por concepto sale de `TicketLinea`, y los gastos de material entran por la
+fecha propia de `GastoMaterial`.
+
+Todavía no hay dashboard principal ni reportes semanal, mensual o anual en HTML; esta
+fase solo expone la vista diaria.

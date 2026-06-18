@@ -1,0 +1,25 @@
+{% extends "chremata/base.html" %}
+
+{% block title %}Login / Archeion{% endblock %}
+
+{% block content %}
+<section class="auth-card">
+  <h1>Ingresar a Archeion</h1>
+  {% if form.errors %}
+    <div class="notice warning">Usuario o contraseña inválidos.</div>
+  {% endif %}
+  <form method="post" class="login-form">
+    {% csrf_token %}
+    <input type="hidden" name="next" value="{{ next }}">
+    <label>
+      Usuario
+      {{ form.username }}
+    </label>
+    <label>
+      Contraseña
+      {{ form.password }}
+    </label>
+    <button type="submit">Entrar</button>
+  </form>
+</section>
+{% endblock %}

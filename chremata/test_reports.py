@@ -386,3 +386,173 @@ class ReporteChremataPeriodoTests(TestCase):
                 )
                 self.assertEqual(reporte["periodo"]["tipo"], tipo)
                 self.assertEqual(reporte["totales"]["total_bruto"], "100.00")
+
+from unittest.mock import patch
+
+from django.contrib.auth import get_user_model
+from django.urls import resolve, reverse
+
+
+@override_settings(TIME_ZONE="America/Matamoros", USE_TZ=True)
+class ReporteDiarioViewTests(TestCase):
+    def setUp(self):
+        timezone.activate(ZoneInfo("America/Matamoros"))
+        self.user = get_user_model().objects.create_user(
+            username="ramiro",
+            password="test-password",
+        )
+
+    def tearDown(self):
+        timezone.deactivate()
+
+    def login(self):
+        self.client.force_login(self.user)
+
+    def reporte_fake(self):
+        return {
+            "contract": "chremata.reporte_periodo.v1",
+            "generated_at": "2026-06-18T12:00:00-05:00",
+            "periodo": {
+                "tipo": "dia",
+                "inicio": "2026-06-18T00:00:00-05:00",
+                "fin": "2026-06-19T00:00:00-05:00",
+                "timezone": "America/Matamoros",
+            },
+            "totales": {
+                "total_bruto": "0.00",
+                "total_procedimiento": "0.00",
+                "total_material_cobrado": "0.00",
+                "total_material_recuperado": "0.00",
+                "total_material_excedente": "0.00",
+                "total_comisiones": "0.00",
+                "total_neto_estimado": "0.00",
+                "total_gastos_material": "0.00",
+                "balance_material_periodo": "0.00",
+            },
+            "actividad": {
+                "tickets_cobrados": 0,
+                "ingresos": 0,
+                "tickets_creados": 0,
+                "tickets_pendientes_creados": 0,
+                "tickets_cancelados_creados": 0,
+                "tickets_abandonados_creados": 0,
+                "promedio_por_ticket": "0.00",
+            },
+            "por_metodo": [],
+            "por_canal": [],
+            "por_concepto": [],
+            "por_origen": [],
+            "ingresos_directos_por_concepto": [],
+            "gastos_material": {
+                "cantidad": 0,
+                "total": "0.00",
+                "con_caja": {"cantidad": 0, "total": "0.00"},
+                "sin_caja": {"cantidad": 0, "total": "0.00"},
+                "por_caja": [],
+                "detalle": [],
+            },
+            "cajas": {
+                "cantidad": 0,
+                "abiertas": 0,
+                "cerradas": 0,
+                "intersectan_periodo": [],
+            },
+            "operaciones_dispositivo": {
+                "recibidas": 0,
+                "procesadas": 0,
+                "fallidas": 0,
+                "conflicto": 0,
+                "pendientes": 0,
+            },
+        }
+
+    def test_url_name_resuelve_reporte_diario(self):
+        match = resolve("/chremata/reportes/dia/")
+
+        self.assertEqual(match.url_name, "chremata_reporte_diario")
+
+    def test_usuario_no_autenticado_redirige_a_login(self):
+        response = self.client.get(reverse("chremata_reporte_diario"))
+
+        self.assertEqual(response.status_code, 302)
+        self.assertIn("/accounts/login/", response["Location"])
+        self.assertIn("next=/chremata/reportes/dia/", response["Location"])
+
+    def test_login_template_carga_para_flujo_de_usuario_y_contrasena(self):
+        response = self.client.get(reverse("login"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTemplateUsed(response, "registration/login.html")
+        self.assertContains(response, "Ingresar a Archeion")
+
+    def test_usuario_autenticado_carga_reporte_diario(self):
+        self.login()
+
+        response = self.client.get(reverse("chremata_reporte_diario"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTemplateUsed(response, "chremata/reportes/dia.html")
+        self.assertContains(response, "Reporte diario Chremata")
+        self.assertContains(response, "Sin datos para este periodo.")
+
+    def test_query_param_fecha_usa_esa_fecha_y_servicio_de_reportes(self):
+        self.login()
+
+        with patch(
+            "chremata.views.calcular_reporte_chremata_periodo",
+            return_value=self.reporte_fake(),
+        ) as calcular_reporte:
+            response = self.client.get(
+                reverse("chremata_reporte_diario"),
+                {"fecha": "2026-06-18"},
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["fecha_consultada"], date(2026, 6, 18))
+        calcular_reporte.assert_called_once()
+        inicio, fin = calcular_reporte.call_args.args[:2]
+        self.assertEqual(inicio.isoformat(), "2026-06-18T00:00:00-05:00")
+        self.assertEqual(fin.isoformat(), "2026-06-19T00:00:00-05:00")
+        self.assertEqual(calcular_reporte.call_args.kwargs["tipo_periodo"], "dia")
+
+    def test_fecha_invalida_no_rompe_y_muestra_advertencia(self):
+        self.login()
+
+        response = self.client.get(
+            reverse("chremata_reporte_diario"),
+            {"fecha": "no-es-fecha"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "La fecha indicada no tiene formato válido")
+
+    def test_vista_muestra_datos_basicos_del_reporte(self):
+        metodo = MetodoPago.objects.create(nombre="Efectivo")
+        canal = CanalCobro.objects.create(nombre="Efectivo en caja", metodo_pago=metodo)
+        esquema = EsquemaComision.objects.create(
+            nombre="Sin comisión",
+            porcentaje_base=Decimal("0.0000"),
+        )
+        esquema.canales_cobro.add(canal)
+        canal.esquema_comision_predeterminado = esquema
+        canal.save()
+        concepto = ConceptoIngreso.objects.create(nombre="Consulta")
+        origen = OrigenIngreso.objects.create(nombre="Consultorio")
+        Ingreso.objects.create(
+            fecha=datetime(2026, 6, 18, 10, 0, tzinfo=timezone.get_current_timezone()),
+            monto_procedimiento=Decimal("123.00"),
+            concepto=concepto,
+            canal_cobro=canal,
+            origen=origen,
+        )
+        self.login()
+
+        response = self.client.get(
+            reverse("chremata_reporte_diario"),
+            {"fecha": "2026-06-18"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "$123.00")
+        self.assertContains(response, "Efectivo")
+        self.assertContains(response, "Consultorio")
