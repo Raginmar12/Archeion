@@ -103,7 +103,7 @@ def reporte_diario(request):
         "fecha_consultada": fecha_consultada,
         "fecha_anterior": fecha_consultada - timedelta(days=1),
         "fecha_siguiente": fecha_consultada + timedelta(days=1),
-        "fecha_hoy": fecha_consultada,
+        "fecha_hoy": timezone.localdate(),
         "reporte": reporte,
     }
     return render(request, "chremata/reportes/dia.html", contexto)
@@ -137,6 +137,7 @@ def reporte_semana(request):
     else:
         fecha_consultada = timezone.localdate()
 
+    fecha_hoy = timezone.localdate()
     inicio, fin = construir_periodo_semana(fecha_consultada)
     contexto = _periodo_contexto(
         "Reporte semanal Chremata",
@@ -147,7 +148,8 @@ def reporte_semana(request):
         fecha_consultada=fecha_consultada,
         fecha_anterior=fecha_consultada - timedelta(days=7),
         fecha_siguiente=fecha_consultada + timedelta(days=7),
-        fecha_hoy=fecha_consultada,
+        fecha_hoy=fecha_hoy,
+        fecha_semana_actual=fecha_hoy,
     )
     return render(request, "chremata/reportes/periodo.html", contexto)
 

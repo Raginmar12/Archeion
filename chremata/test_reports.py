@@ -800,11 +800,14 @@ class ReporteDiarioViewTests(TestCase):
     def test_reporte_diario_muestra_navegacion_periodo_con_query_params(self):
         self.login()
 
-        response = self.client.get(reverse("chremata_reporte_diario"), {"fecha": "2026-06-18"})
+        with patch("chremata.views.timezone.localdate", return_value=date(2026, 6, 20)):
+            response = self.client.get(reverse("chremata_reporte_diario"), {"fecha": "2026-06-18"})
 
         self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["fecha_consultada"], date(2026, 6, 18))
+        self.assertEqual(response.context["fecha_hoy"], date(2026, 6, 20))
         self.assertContains(response, 'href="?fecha=2026-06-17"')
-        self.assertContains(response, 'href="?fecha=2026-06-18"')
+        self.assertContains(response, 'href="?fecha=2026-06-20"')
         self.assertContains(response, 'href="?fecha=2026-06-19"')
 
     def test_vista_muestra_link_a_detalle_html_de_caja(self):
@@ -944,7 +947,7 @@ class ReporteDiarioViewTests(TestCase):
             (
                 "chremata_reporte_semana",
                 {"fecha": "2026-06-18"},
-                ('href="?fecha=2026-06-11"', 'href="?fecha=2026-06-18"', 'href="?fecha=2026-06-25"'),
+                ('href="?fecha=2026-06-11"', 'href="?fecha=2026-06-20"', 'href="?fecha=2026-06-25"'),
                 ("Semana anterior", "Esta semana", "Semana siguiente"),
             ),
             (
@@ -960,14 +963,19 @@ class ReporteDiarioViewTests(TestCase):
                 ("Año anterior", "Este año", "Año siguiente"),
             ),
         )
-        for name, params, hrefs, labels in casos:
-            with self.subTest(name=name):
-                response = self.client.get(reverse(name), params)
-                self.assertEqual(response.status_code, 200)
-                for href in hrefs:
-                    self.assertContains(response, href)
-                for label in labels:
-                    self.assertContains(response, label)
+        with patch("chremata.views.timezone.localdate", return_value=date(2026, 6, 20)):
+            for name, params, hrefs, labels in casos:
+                with self.subTest(name=name):
+                    response = self.client.get(reverse(name), params)
+                    self.assertEqual(response.status_code, 200)
+                    if name == "chremata_reporte_semana":
+                        self.assertEqual(response.context["fecha_consultada"], date(2026, 6, 18))
+                        self.assertEqual(response.context["fecha_hoy"], date(2026, 6, 20))
+                        self.assertEqual(response.context["fecha_semana_actual"], date(2026, 6, 20))
+                    for href in hrefs:
+                        self.assertContains(response, href)
+                    for label in labels:
+                        self.assertContains(response, label)
 
     def test_reportes_periodo_parametros_invalidos_no_rompen(self):
         self.login()
