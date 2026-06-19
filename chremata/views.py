@@ -53,19 +53,15 @@ def dashboard(request):
     )
     caja_resumen = caja_abierta or ultima_caja
 
-    ultimos_cobros = (
-        TicketPago.objects.select_related(
-            "ticket",
-            "ingreso",
-            "canal_cobro",
-            "canal_cobro__metodo_pago",
-        )
-        .order_by("-fecha", "-id")[:5]
-    )
-    ultimos_gastos = (
-        GastoMaterial.objects.select_related("caja_sesion", "caja_sesion__caja_fisica")
-        .order_by("-fecha", "-id")[:5]
-    )
+    ultimos_cobros = TicketPago.objects.select_related(
+        "ticket",
+        "ingreso",
+        "canal_cobro",
+        "canal_cobro__metodo_pago",
+    ).order_by("-fecha", "-id")[:5]
+    ultimos_gastos = GastoMaterial.objects.select_related(
+        "caja_sesion", "caja_sesion__caja_fisica"
+    ).order_by("-fecha", "-id")[:5]
 
     contexto = {
         "fecha_hoy": fecha_hoy,
@@ -141,6 +137,7 @@ def reporte_semana(request):
     else:
         fecha_consultada = timezone.localdate()
 
+    fecha_hoy = timezone.localdate()
     inicio, fin = construir_periodo_semana(fecha_consultada)
     contexto = _periodo_contexto(
         "Reporte semanal Chremata",
@@ -151,7 +148,8 @@ def reporte_semana(request):
         fecha_consultada=fecha_consultada,
         fecha_anterior=fecha_consultada - timedelta(days=7),
         fecha_siguiente=fecha_consultada + timedelta(days=7),
-        fecha_hoy=timezone.localdate(),
+        fecha_hoy=fecha_hoy,
+        fecha_semana_actual=fecha_hoy,
     )
     return render(request, "chremata/reportes/periodo.html", contexto)
 
@@ -220,7 +218,6 @@ def reporte_anio(request):
         hoy_anio=hoy.year,
     )
     return render(request, "chremata/reportes/periodo.html", contexto)
-
 
 
 @login_required

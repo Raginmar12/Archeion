@@ -433,6 +433,47 @@ def _chremata_operations_schema():
             "validates_catalog_public_ids": True,
         },
     }
+
+    operaciones["actualizar_ticket_pendiente"] = {
+        **_ticket_operation_common("chremata.operation.actualizar_ticket_pendiente.v1"),
+        "payload_fields": [
+            _campo_schema(
+                "operation", "string", compatibility="operation_type_alias_supported"
+            ),
+            _campo_schema(
+                "operation_type",
+                "string",
+                required=False,
+                compatibility="alias_for_operation",
+            ),
+            _campo_schema(
+                "operation_contract",
+                "string",
+                required=False,
+                compatibility="inferred_from_schema_version_1",
+            ),
+            _campo_schema("schema_version", "integer", required=False),
+            _campo_schema("device_id", "string"),
+            _campo_schema("device_entry_id", "string"),
+            _campo_schema(
+                "ticket_public_id", "uuid", relation="ticket.ticket_public_id"
+            ),
+            _campo_schema("nombre_referencia", "string", required=False),
+            _campo_schema(
+                "lineas", "array", contract="chremata.ticket_linea.actualizacion.v1"
+            ),
+        ],
+        "server_authority": {
+            "requires_ticket_pendiente": True,
+            "replaces_ticket_lines": True,
+            "recalculates_line_totals": True,
+            "recalculates_ticket_totals": True,
+            "creates_ingreso": False,
+            "creates_ticket_pago": False,
+            "changes_ticket_state": False,
+            "validates_catalog_public_ids": True,
+        },
+    }
     operaciones["cobrar_ticket"] = {
         **_ticket_operation_common("chremata.operation.cobrar_ticket.v1"),
         "payload_fields": [

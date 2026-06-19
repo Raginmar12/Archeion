@@ -42,7 +42,7 @@
 <nav class="period-nav" aria-label="Navegación de periodo">
   {% if tipo_periodo == "semana" %}
     <a href="?fecha={{ fecha_anterior|date:'Y-m-d' }}">Semana anterior</a>
-    <a href="?fecha={{ fecha_hoy|date:'Y-m-d' }}">Esta semana</a>
+    <a href="?fecha={{ fecha_semana_actual|date:'Y-m-d' }}">Esta semana</a>
     <a href="?fecha={{ fecha_siguiente|date:'Y-m-d' }}">Semana siguiente</a>
   {% elif tipo_periodo == "mes" %}
     <a href="?anio={{ mes_anterior_anio }}&mes={{ mes_anterior_mes }}">Mes anterior</a>

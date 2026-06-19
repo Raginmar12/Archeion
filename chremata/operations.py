@@ -33,6 +33,10 @@ CREAR_TICKET = "crear_ticket"
 CREAR_TICKET_CONTRACT = "chremata.operation.crear_ticket.v1"
 COBRAR_TICKET = "cobrar_ticket"
 COBRAR_TICKET_CONTRACT = "chremata.operation.cobrar_ticket.v1"
+ACTUALIZAR_TICKET_PENDIENTE = "actualizar_ticket_pendiente"
+ACTUALIZAR_TICKET_PENDIENTE_CONTRACT = (
+    "chremata.operation.actualizar_ticket_pendiente.v1"
+)
 CANCELAR_TICKET = "cancelar_ticket"
 CANCELAR_TICKET_CONTRACT = "chremata.operation.cancelar_ticket.v1"
 ABANDONAR_TICKET = "abandonar_ticket"
@@ -237,6 +241,21 @@ def _validar_campos_comunes(payload):
             "El payload debe ser un objeto JSON.",
             status_code=400,
         )
+    if "operation" not in payload and "operation_type" in payload:
+        payload["operation"] = payload["operation_type"]
+    if "operation_contract" not in payload and payload.get("schema_version") == 1:
+        contratos = {
+            CREAR_TICKET: CREAR_TICKET_CONTRACT,
+            COBRAR_TICKET: COBRAR_TICKET_CONTRACT,
+            ACTUALIZAR_TICKET_PENDIENTE: ACTUALIZAR_TICKET_PENDIENTE_CONTRACT,
+            CANCELAR_TICKET: CANCELAR_TICKET_CONTRACT,
+            ABANDONAR_TICKET: ABANDONAR_TICKET_CONTRACT,
+            CREAR_GASTO_MATERIAL: CREAR_GASTO_MATERIAL_CONTRACT,
+            ABRIR_CAJA: ABRIR_CAJA_CONTRACT,
+            CERRAR_CAJA: CERRAR_CAJA_CONTRACT,
+        }
+        if payload.get("operation") in contratos:
+            payload["operation_contract"] = contratos[payload["operation"]]
     require_fields(
         payload, ["operation", "operation_contract", "device_id", "device_entry_id"]
     )
@@ -254,6 +273,7 @@ def _validar_operacion_soportada(payload):
     contratos = {
         CREAR_TICKET: CREAR_TICKET_CONTRACT,
         COBRAR_TICKET: COBRAR_TICKET_CONTRACT,
+        ACTUALIZAR_TICKET_PENDIENTE: ACTUALIZAR_TICKET_PENDIENTE_CONTRACT,
         CANCELAR_TICKET: CANCELAR_TICKET_CONTRACT,
         ABANDONAR_TICKET: ABANDONAR_TICKET_CONTRACT,
         CREAR_GASTO_MATERIAL: CREAR_GASTO_MATERIAL_CONTRACT,
@@ -264,9 +284,16 @@ def _validar_operacion_soportada(payload):
     if operation not in contratos:
         raise OperationValidationError(
             "unsupported_operation",
-            "Esta fase soporta crear_ticket, cobrar_ticket, cancelar_ticket, "
-            "abandonar_ticket, crear_gasto_material, abrir_caja y cerrar_caja.",
+            "Esta fase soporta crear_ticket, actualizar_ticket_pendiente, cobrar_ticket, "
+            "cancelar_ticket, abandonar_ticket, crear_gasto_material, abrir_caja y cerrar_caja.",
             fields={"operation": "unsupported"},
+            status_code=400,
+        )
+    if payload.get("schema_version") not in (None, 1):
+        raise OperationValidationError(
+            "invalid_schema_version",
+            "schema_version debe ser 1 cuando se envía.",
+            fields={"schema_version": "invalid"},
             status_code=400,
         )
     if payload["operation_contract"] != contratos[operation]:
@@ -457,9 +484,7 @@ def _handle_abrir_caja(payload):
                 "business_validation_error",
                 "El origen de ingreso no está activo.",
                 fields={
-                    "origen_ingreso_public_id": [
-                        "El origen de ingreso no está activo."
-                    ]
+                    "origen_ingreso_public_id": ["El origen de ingreso no está activo."]
                 },
                 status_code=422,
             )
@@ -507,16 +532,11 @@ def _crear_resumen_snapshot_cierre(caja):
             "estado": result["estado"],
             "device_id": caja.device_id,
             "caja_fisica": _serializar_caja_fisica_operacion(caja.caja_fisica),
-            "origen_ingreso": _serializar_origen_ingreso_operacion(
-                caja.origen_ingreso
-            ),
+            "origen_ingreso": _serializar_origen_ingreso_operacion(caja.origen_ingreso),
             "abierta_en": result["abierta_en"],
             "cerrada_en": result["cerrada_en"],
         },
-        "totales": {
-            campo: result[campo]
-            for campo in _totales_caja_cero().keys()
-        },
+        "totales": {campo: result[campo] for campo in _totales_caja_cero().keys()},
         "efectivo": {
             "saldo_inicial_efectivo": result["saldo_inicial_efectivo"],
             "efectivo_contado_cierre": result["efectivo_contado_cierre"],
@@ -788,6 +808,169 @@ def _resultado_ticket_operativo(ticket, fecha, campo_fecha, *, incluir_nombre=Fa
     return result
 
 
+def _validar_linea_actualizacion(linea, indice):
+    if not isinstance(linea, dict):
+        raise OperationValidationError(
+            "invalid_payload",
+            "Cada línea debe ser un objeto JSON.",
+            fields={f"lineas.{indice}": "invalid_object"},
+            status_code=400,
+        )
+    require_fields(
+        linea,
+        ["concepto_ingreso_public_id", "cantidad", "monto_unitario"],
+    )
+    concepto_public_id = parse_uuid(
+        linea["concepto_ingreso_public_id"],
+        f"lineas.{indice}.concepto_ingreso_public_id",
+    )
+    concepto = get_by_public_id(
+        ConceptoIngreso,
+        concepto_public_id,
+        f"lineas.{indice}.concepto_ingreso_public_id",
+    )
+    if not concepto.activo:
+        raise OperationValidationError(
+            "business_validation_error",
+            "El concepto de ingreso no está activo.",
+            fields={
+                f"lineas.{indice}.concepto_ingreso_public_id": [
+                    "El concepto de ingreso no está activo."
+                ]
+            },
+            status_code=422,
+        )
+    cantidad = parse_decimal_string(linea["cantidad"], f"lineas.{indice}.cantidad")
+    if cantidad <= Decimal("0.00"):
+        raise OperationValidationError(
+            "business_validation_error",
+            "cantidad debe ser mayor que cero.",
+            fields={f"lineas.{indice}.cantidad": ["Debe ser mayor que cero."]},
+            status_code=422,
+        )
+    monto_unitario = parse_money_string(
+        linea["monto_unitario"],
+        f"lineas.{indice}.monto_unitario",
+    )
+    if monto_unitario < Decimal("0.00"):
+        raise OperationValidationError(
+            "business_validation_error",
+            "monto_unitario debe ser mayor o igual que cero.",
+            fields={
+                f"lineas.{indice}.monto_unitario": ["Debe ser mayor o igual que cero."]
+            },
+            status_code=422,
+        )
+    monto_material_cobrado = parse_money_string(
+        linea.get("monto_material_cobrado", "0.00"),
+        f"lineas.{indice}.monto_material_cobrado",
+    )
+    if monto_material_cobrado < Decimal("0.00"):
+        raise OperationValidationError(
+            "business_validation_error",
+            "monto_material_cobrado debe ser mayor o igual que cero.",
+            fields={
+                f"lineas.{indice}.monto_material_cobrado": [
+                    "Debe ser mayor o igual que cero."
+                ]
+            },
+            status_code=422,
+        )
+    if (
+        monto_material_cobrado > Decimal("0.00")
+        and not concepto.permite_material_adicional
+    ):
+        raise OperationValidationError(
+            "business_validation_error",
+            "El ticket no pudo actualizarse.",
+            fields={
+                f"lineas.{indice}.monto_material_cobrado": [
+                    "Este concepto no permite cobrar material adicional."
+                ]
+            },
+            status_code=422,
+        )
+    orden = linea.get("orden", indice + 1)
+    if not isinstance(orden, int):
+        raise OperationValidationError(
+            "invalid_payload",
+            "orden debe ser entero.",
+            fields={f"lineas.{indice}.orden": "invalid_int"},
+            status_code=400,
+        )
+    return {
+        "concepto": concepto,
+        "descripcion": linea.get("descripcion", ""),
+        "cantidad": cantidad,
+        "monto_unitario": monto_unitario,
+        "monto_material_cobrado": monto_material_cobrado,
+        "orden": orden,
+        "notas": linea.get("notas", ""),
+    }
+
+
+def _handle_actualizar_ticket_pendiente(payload):
+    require_fields(payload, ["ticket_public_id", "lineas"])
+    ticket_public_id = parse_uuid(payload["ticket_public_id"], "ticket_public_id")
+    nombre_referencia = payload.get("nombre_referencia", None)
+    if nombre_referencia is not None and not isinstance(nombre_referencia, str):
+        raise OperationValidationError(
+            "invalid_payload",
+            "nombre_referencia debe ser string.",
+            fields={"nombre_referencia": "invalid_string"},
+            status_code=400,
+        )
+    lineas_payload = payload["lineas"]
+    if not isinstance(lineas_payload, list) or not lineas_payload:
+        raise OperationValidationError(
+            "invalid_payload",
+            "lineas debe ser una lista no vacía.",
+            fields={"lineas": "required_non_empty_list"},
+            status_code=400,
+        )
+    lineas_validadas = [
+        _validar_linea_actualizacion(linea, indice)
+        for indice, linea in enumerate(lineas_payload)
+    ]
+
+    try:
+        ticket = Ticket.objects.select_for_update().get(public_id=ticket_public_id)
+    except Ticket.DoesNotExist as exc:
+        raise OperationValidationError(
+            "reference_not_found",
+            "No existe Ticket con ese public_id.",
+            field="ticket_public_id",
+            status_code=422,
+        ) from exc
+
+    if ticket.estado != Ticket.ESTADO_PENDIENTE:
+        raise OperationValidationError(
+            "business_validation_error",
+            "Solo se pueden actualizar tickets pendientes.",
+            fields={"estado": ["Solo se pueden actualizar tickets pendientes."]},
+            status_code=422,
+        )
+
+    ticket.lineas.all().delete()
+    if nombre_referencia is not None:
+        ticket.nombre_referencia = nombre_referencia
+        ticket.save(update_fields=["nombre_referencia", "actualizado_en"])
+    for linea in lineas_validadas:
+        TicketLinea.objects.create(ticket=ticket, **linea)
+    ticket.recalcular_totales()
+    ticket.refresh_from_db()
+
+    return ticket, {
+        "ticket_public_id": str(ticket.public_id),
+        "ticket_estado": ticket.estado,
+        "nombre_referencia": ticket.nombre_referencia,
+        "lineas": ticket.lineas.count(),
+        "monto_total": _decimal_money_string(ticket.monto_total),
+        "monto_material_cobrado": _decimal_money_string(ticket.monto_material_cobrado),
+        "monto_total_cobrado": _decimal_money_string(ticket.monto_total_cobrado),
+    }
+
+
 def _handle_crear_gasto_material(payload):
     require_fields(payload, ["gasto_material"])
     gasto_payload = payload["gasto_material"]
@@ -836,11 +1019,15 @@ def _handle_crear_gasto_material(payload):
         descripcion=descripcion,
         notas=notas,
     )
-    return gasto, caja_sesion, {
-        "fecha": _datetime_utc_string(gasto.fecha),
-        "monto": _decimal_money_string(gasto.monto),
-        "descripcion": gasto.descripcion,
-    }
+    return (
+        gasto,
+        caja_sesion,
+        {
+            "fecha": _datetime_utc_string(gasto.fecha),
+            "monto": _decimal_money_string(gasto.monto),
+            "descripcion": gasto.descripcion,
+        },
+    )
 
 
 def _handle_cerrar_ticket_operativo(payload, *, operation, servicio, campo_fecha):
@@ -1005,6 +1192,10 @@ def _procesar_payload_nuevo(payload):
         pago = None
     elif payload["operation"] == COBRAR_TICKET:
         ticket, ingreso, pago, caja_sesion, result = _handle_cobrar_ticket(payload)
+    elif payload["operation"] == ACTUALIZAR_TICKET_PENDIENTE:
+        ticket, result = _handle_actualizar_ticket_pendiente(payload)
+        ingreso = None
+        pago = None
     elif payload["operation"] == CANCELAR_TICKET:
         ticket, ingreso, pago, result = _handle_cerrar_ticket_operativo(
             payload,
