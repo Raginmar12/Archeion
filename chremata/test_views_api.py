@@ -1008,11 +1008,7 @@ class ChremataOperationsApiTests(TestCase):
         self.assertEqual(response.json()["error"]["code"], "business_validation_error")
         self.assertEqual(
             response.json()["error"]["fields"],
-            {
-                "origen_ingreso_public_id": [
-                    "El origen de ingreso no está activo."
-                ]
-            },
+            {"origen_ingreso_public_id": ["El origen de ingreso no está activo."]},
         )
         self.assertEqual(CajaSesion.objects.count(), 0)
 
@@ -1949,7 +1945,9 @@ class ChremataOperationsApiTests(TestCase):
         self.assertEqual(GastoMaterial.objects.count(), 1)
         self.assertEqual(OperacionDispositivoChremata.objects.get().caja_sesion, caja)
 
-    def test_crear_gasto_material_con_caja_misma_llave_payload_distinto_devuelve_409(self):
+    def test_crear_gasto_material_con_caja_misma_llave_payload_distinto_devuelve_409(
+        self,
+    ):
         caja = self.crear_caja_sesion_abierta()
         payload = self.payload_crear_gasto_material(caja_public_id=str(caja.public_id))
         payload_distinto = dict(payload)
@@ -2559,7 +2557,9 @@ class CorteCajaApiTests(TestCase):
             metodo_pago=self.metodo_tarjeta,
             esquema_comision_predeterminado=self.esquema_mp,
         )
-        self.esquema_sin_comision.canales_cobro.add(self.canal_efectivo, self.canal_spei)
+        self.esquema_sin_comision.canales_cobro.add(
+            self.canal_efectivo, self.canal_spei
+        )
         self.esquema_mp.canales_cobro.add(self.canal_tap, self.canal_point)
         self.origen = OrigenIngreso.objects.create(nombre="Consultorio")
         self.concepto_consulta = ConceptoIngreso.objects.create(nombre="Consulta")
@@ -2662,7 +2662,9 @@ class CorteCajaApiTests(TestCase):
         self.assertEqual(corte["totales"]["total_tarjeta"], "200.00")
         self.assertEqual(corte["totales"]["total_comisiones"], "8.12")
         canales = {item["canal_cobro"]: item for item in corte["totales_por_canal"]}
-        self.assertEqual(set(canales), {"Efectivo en caja", "SPEI", "Tap (MP)", "Point Air (MP)"})
+        self.assertEqual(
+            set(canales), {"Efectivo en caja", "SPEI", "Tap (MP)", "Point Air (MP)"}
+        )
         self.assertEqual(canales["Tap (MP)"]["total_comisiones"], "4.06")
 
     def test_corte_agrupa_conceptos_desde_ticket_linea_y_no_resumen(self):
@@ -2834,7 +2836,9 @@ class CorteCajaApiTests(TestCase):
         self.assertEqual(self.caja.total_efectivo, Decimal("100.00"))
         self.assertEqual(self.caja.efectivo_esperado, Decimal("580.00"))
         self.assertEqual(self.caja.diferencia_efectivo, Decimal("10.00"))
-        self.assertEqual(self.caja.resumen_snapshot["contract"], "chremata.corte_caja.v1")
+        self.assertEqual(
+            self.caja.resumen_snapshot["contract"], "chremata.corte_caja.v1"
+        )
         self.assertEqual(self.caja.resumen_snapshot["totales"]["total_bruto"], "100.00")
         self.assertEqual(
             self.caja.resumen_snapshot["efectivo"]["efectivo_esperado"],
@@ -3684,9 +3688,13 @@ class ChremataSchemaApiTests(TestCase):
             "no reemplaza",
             abrir_fields["origen_ingreso_public_id"]["description"],
         )
-        self.assertEqual(cerrar_fields["caja_public_id"]["relation"], "caja_sesion.public_id")
+        self.assertEqual(
+            cerrar_fields["caja_public_id"]["relation"], "caja_sesion.public_id"
+        )
         self.assertEqual(abrir_fields["saldo_inicial_efectivo"]["type"], "money_string")
-        self.assertEqual(cerrar_fields["efectivo_contado_cierre"]["type"], "money_string")
+        self.assertEqual(
+            cerrar_fields["efectivo_contado_cierre"]["type"], "money_string"
+        )
 
     def test_crear_ticket_incluye_lineas_como_array(self):
         data = self.get_schema().json()
@@ -3864,6 +3872,7 @@ class ChremataSchemaApiTests(TestCase):
                 "abrir_caja",
                 "cerrar_caja",
                 "crear_ticket",
+                "actualizar_ticket_pendiente",
                 "cobrar_ticket",
                 "cancelar_ticket",
                 "abandonar_ticket",
@@ -3920,7 +3929,9 @@ class ChremataSchemaApiTests(TestCase):
         gasto_fields = self.operation_payload_fields_by_name(
             self.get_schema().json(), "crear_gasto_material"
         )
-        self.assertEqual(gasto_fields["caja_public_id"]["relation"], "caja_sesion.public_id")
+        self.assertEqual(
+            gasto_fields["caja_public_id"]["relation"], "caja_sesion.public_id"
+        )
         self.assertFalse(gasto_fields["caja_public_id"]["required"])
         self.assertTrue(gasto_fields["caja_public_id"]["nullable"])
 
@@ -3965,3 +3976,248 @@ class ChremataSchemaApiTests(TestCase):
 
         self.assertFalse(catalog_fields & campos_prohibidos)
         self.assertFalse(operation_fields & campos_prohibidos)
+
+
+class ActualizarTicketPendienteApiTests(ChremataOperationsApiTests):
+    def payload_actualizar_ticket_pendiente(self, ticket, **overrides):
+        payload = {
+            "operation_type": "actualizar_ticket_pendiente",
+            "schema_version": 1,
+            "device_id": "zephyros-cardputer",
+            "device_entry_id": str(uuid4()),
+            "ticket_public_id": str(ticket.public_id),
+            "nombre_referencia": "Referencia editada",
+            "lineas": [
+                {
+                    "concepto_ingreso_public_id": str(self.concepto.public_id),
+                    "cantidad": "1.00",
+                    "monto_unitario": "50.00",
+                }
+            ],
+        }
+        payload.update(overrides)
+        return payload
+
+    def test_actualizar_ticket_pendiente_agrega_linea(self):
+        ticket = self.crear_ticket_para_cobrar()
+        payload = self.payload_actualizar_ticket_pendiente(
+            ticket,
+            lineas=[
+                {
+                    "concepto_ingreso_public_id": str(self.concepto.public_id),
+                    "cantidad": "1.00",
+                    "monto_unitario": "50.00",
+                },
+                {
+                    "concepto_ingreso_public_id": str(self.concepto.public_id),
+                    "cantidad": "1.00",
+                    "monto_unitario": "25.00",
+                },
+            ],
+        )
+        response = self.post_operation(payload)
+        self.assertEqual(response.status_code, 200)
+        ticket.refresh_from_db()
+        self.assertEqual(ticket.lineas.count(), 2)
+        self.assertEqual(ticket.monto_total, Decimal("75.00"))
+
+    def test_actualizar_ticket_pendiente_cambia_precio_unitario(self):
+        ticket = self.crear_ticket_para_cobrar()
+        response = self.post_operation(
+            self.payload_actualizar_ticket_pendiente(
+                ticket,
+                lineas=[
+                    {
+                        "concepto_ingreso_public_id": str(self.concepto.public_id),
+                        "cantidad": "1.00",
+                        "monto_unitario": "99.00",
+                    }
+                ],
+            )
+        )
+        self.assertEqual(response.status_code, 200)
+        ticket.refresh_from_db()
+        self.assertEqual(ticket.monto_total, Decimal("99.00"))
+
+    def test_actualizar_ticket_pendiente_cambia_cantidad(self):
+        ticket = self.crear_ticket_para_cobrar()
+        response = self.post_operation(
+            self.payload_actualizar_ticket_pendiente(
+                ticket,
+                lineas=[
+                    {
+                        "concepto_ingreso_public_id": str(self.concepto.public_id),
+                        "cantidad": "3.00",
+                        "monto_unitario": "50.00",
+                    }
+                ],
+            )
+        )
+        self.assertEqual(response.status_code, 200)
+        ticket.refresh_from_db()
+        self.assertEqual(ticket.monto_total, Decimal("150.00"))
+
+    def test_actualizar_ticket_pendiente_quita_linea(self):
+        ticket = self.crear_ticket_para_cobrar()
+        TicketLinea.objects.create(
+            ticket=ticket,
+            concepto=self.concepto,
+            cantidad=Decimal("1.00"),
+            monto_unitario=Decimal("40.00"),
+        )
+        response = self.post_operation(self.payload_actualizar_ticket_pendiente(ticket))
+        self.assertEqual(response.status_code, 200)
+        ticket.refresh_from_db()
+        self.assertEqual(ticket.lineas.count(), 1)
+        self.assertEqual(ticket.monto_total, Decimal("50.00"))
+
+    def test_actualizar_ticket_pendiente_edita_nombre_referencia(self):
+        ticket = self.crear_ticket_para_cobrar()
+        response = self.post_operation(
+            self.payload_actualizar_ticket_pendiente(
+                ticket, nombre_referencia="Nuevo nombre"
+            )
+        )
+        self.assertEqual(response.status_code, 200)
+        ticket.refresh_from_db()
+        self.assertEqual(ticket.nombre_referencia, "Nuevo nombre")
+
+    def test_actualizar_ticket_pendiente_duplicado_exacto_idempotente(self):
+        ticket = self.crear_ticket_para_cobrar()
+        payload = self.payload_actualizar_ticket_pendiente(ticket)
+        self.assertEqual(self.post_operation(payload).status_code, 200)
+        response = self.post_operation(payload)
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.json()["duplicate"])
+        self.assertEqual(ticket.lineas.count(), 1)
+
+    def test_actualizar_ticket_pendiente_conflicto_mismo_device_entry_payload_distinto(
+        self,
+    ):
+        ticket = self.crear_ticket_para_cobrar()
+        payload = self.payload_actualizar_ticket_pendiente(ticket)
+        self.assertEqual(self.post_operation(payload).status_code, 200)
+        payload_distinto = dict(payload, nombre_referencia="Otro")
+        response = self.post_operation(payload_distinto)
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(response.json()["error"]["code"], "payload_conflict")
+
+    def test_actualizar_ticket_pendiente_rechaza_ticket_inexistente(self):
+        ticket = self.crear_ticket_para_cobrar()
+        response = self.post_operation(
+            self.payload_actualizar_ticket_pendiente(
+                ticket, ticket_public_id=str(uuid4())
+            )
+        )
+        self.assertEqual(response.status_code, 422)
+
+    def test_actualizar_ticket_pendiente_rechaza_estados_no_pendientes(self):
+        for estado in [
+            Ticket.ESTADO_COBRADO,
+            Ticket.ESTADO_CANCELADO,
+            Ticket.ESTADO_ABANDONADO,
+        ]:
+            with self.subTest(estado=estado):
+                ticket = self.crear_ticket_para_cobrar(estado=estado)
+                response = self.post_operation(
+                    self.payload_actualizar_ticket_pendiente(ticket)
+                )
+                self.assertEqual(response.status_code, 422)
+
+    def test_cobrar_despues_de_actualizar_usa_total_actualizado(self):
+        ticket = self.crear_ticket_para_cobrar()
+        self.assertEqual(
+            self.post_operation(
+                self.payload_actualizar_ticket_pendiente(
+                    ticket,
+                    lineas=[
+                        {
+                            "concepto_ingreso_public_id": str(self.concepto.public_id),
+                            "cantidad": "2.00",
+                            "monto_unitario": "70.00",
+                        }
+                    ],
+                )
+            ).status_code,
+            200,
+        )
+        response = self.post_operation(self.payload_cobrar_ticket(ticket))
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["result"]["monto_total_cobrado"], "140.00")
+        self.assertEqual(
+            TicketPago.objects.get().ingreso.monto_total, Decimal("140.00")
+        )
+
+    def test_material_recuperado_despues_de_cobrar_usa_lineas_actualizadas(self):
+        ticket = self.crear_ticket_para_cobrar()
+        self.assertEqual(
+            self.post_operation(self.payload_crear_gasto_material()).status_code, 200
+        )
+        self.assertEqual(
+            self.post_operation(
+                self.payload_actualizar_ticket_pendiente(
+                    ticket,
+                    lineas=[
+                        {
+                            "concepto_ingreso_public_id": str(
+                                self.concepto_material.public_id
+                            ),
+                            "cantidad": "1.00",
+                            "monto_unitario": "80.00",
+                            "monto_material_cobrado": "30.00",
+                        }
+                    ],
+                )
+            ).status_code,
+            200,
+        )
+        response = self.post_operation(
+            self.payload_cobrar_ticket(
+                ticket,
+                concepto_ingreso_resumen_public_id=str(
+                    self.concepto_material.public_id
+                ),
+            )
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["result"]["material_recuperado"], "30.00")
+        self.assertEqual(
+            TicketPago.objects.get().ingreso.monto_material_cobrado, Decimal("30.00")
+        )
+
+    def test_corte_caja_no_usa_lineas_viejas_despues_del_cobro(self):
+        caja = self.crear_caja_sesion_abierta()
+        ticket = self.crear_ticket_para_cobrar(monto_unitario=Decimal("160.00"))
+        self.assertEqual(
+            self.post_operation(
+                self.payload_actualizar_ticket_pendiente(
+                    ticket,
+                    lineas=[
+                        {
+                            "concepto_ingreso_public_id": str(
+                                self.concepto_material.public_id
+                            ),
+                            "cantidad": "1.00",
+                            "monto_unitario": "80.00",
+                            "monto_material_cobrado": "30.00",
+                        }
+                    ],
+                )
+            ).status_code,
+            200,
+        )
+        self.assertEqual(
+            self.post_operation(
+                self.payload_cobrar_ticket(
+                    ticket,
+                    caja_public_id=str(caja.public_id),
+                    concepto_ingreso_resumen_public_id=str(
+                        self.concepto_material.public_id
+                    ),
+                )
+            ).status_code,
+            200,
+        )
+        corte = calcular_corte_caja(caja)
+        self.assertEqual(corte["totales"]["total_bruto"], "110.00")
+        self.assertEqual(corte["totales"]["total_material_cobrado"], "30.00")
